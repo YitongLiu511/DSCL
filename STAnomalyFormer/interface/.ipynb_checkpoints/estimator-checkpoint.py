@@ -8,7 +8,6 @@ from sklearn.metrics import roc_auc_score
 from typing import Union, List, Tuple, Literal
 from copy import deepcopy
 from tqdm import tqdm
-import numpy as np
 
 from ..model.module import SpatialTSFM, TemporalTSFM
 from ..model.baseline import DOMINANT, AnomalyDAE, GCN, LSTMAE
@@ -776,334 +775,13 @@ class STAnomalyFormerDetector_v1(BaseDetector):
         return predict_by_score(score, self.contamination)
 
     @torch.no_grad()
-    def decision_function(self, x, return_dict=False):
-        self.model.eval()
+    def decision_function(self, x):
         x = torch.tensor(x, dtype=torch.float).to(self.device)
-        
-        # 获取模型输出
-        output_dict = self.model(x, return_dict=True)
-        
-        # 确保分数维度正确
-        region_scores = output_dict['region_scores']  # [N, T]
-        time_scores = output_dict['time_scores']      # [N, T]
-        
-        # 将分数组合成[N, T, 2]的形式
-        anomaly_scores = torch.stack([region_scores, time_scores], dim=-1)
-        
-        # 计算阈值
-        self.region_threshold = self.calculate_adaptive_threshold(region_scores)
-        self.time_threshold = self.calculate_adaptive_threshold(time_scores)
-        
-        # 检测异常事件
-        anomaly_events = {
-            'region_anomalies': (region_scores > self.region_threshold).int(),
-            'time_anomalies': (time_scores > self.time_threshold).int()
-        }
-        
-        if return_dict:
-            return {
-                'anomaly_scores': anomaly_scores,  # [N, T, 2]
-                'region_scores': region_scores,    # [N, T]
-                'time_scores': time_scores,        # [N, T]
-                'anomaly_events': anomaly_events,
-                'region_threshold': self.region_threshold,
-                'time_threshold': self.time_threshold
-            }
-        else:
-            return anomaly_scores.cpu().numpy()
-
-    def calculate_adaptive_threshold(self, scores, contamination=None):
-        if contamination is None:
-            contamination = self.contamination
-            
-        scores = scores.detach().cpu()
-        
-        # 添加调试信息
-        if self.verbose:
-            print(f"[DEBUG] 计算阈值:")
-            print(f"分数形状: {scores.shape}")
-            print(f"分数范围: [{scores.min():.4f}, {scores.max():.4f}]")
-            print(f"分数均值: {scores.mean():.4f}")
-            print(f"分数标准差: {scores.std():.4f}")
-        
-        # 确保分数不为全0
-        if torch.all(scores == 0):
-            print("[WARNING] 所有分数都为0，使用默认阈值")
-            return torch.tensor(0.5)
-        
-        if self.threshold_method == 'quantile':
-            # 使用更保守的分位数
-            threshold = torch.quantile(scores, 1 - contamination * 1.5)
-        elif self.threshold_method == 'mean':
-            # 使用均值加标准差的方法
-            mean = scores.mean()
-            std = scores.std()
-            threshold = mean + std * (1 - contamination)
-        elif self.threshold_method == 'max':
-            # 使用最大值的百分比
-            max_score = scores.max()
-            threshold = max_score * (1 - contamination)
-        else:
-            raise ValueError(f"不支持的阈值计算方法: {self.threshold_method}")
-        
-        # 确保阈值不为0
-        threshold = max(threshold, scores.mean() * 0.1)
-        
-        if self.verbose:
-            print(f"计算得到的阈值: {threshold:.4f}")
-            
-        return threshold
-
-    def detect_anomalies(self, region_scores, time_scores):
-        region_scores = region_scores.detach().cpu()
-        time_scores = time_scores.detach().cpu()
-        
-        # 添加调试信息
-        if self.verbose:
-            print(f"[DEBUG] 检测异常:")
-            print(f"区域分数形状: {region_scores.shape}")
-            print(f"时间分数形状: {time_scores.shape}")
-            print(f"区域分数范围: [{region_scores.min():.4f}, {region_scores.max():.4f}]")
-            print(f"时间分数范围: [{time_scores.min():.4f}, {time_scores.max():.4f}]")
-        
-        # 确保分数维度正确
-        if len(region_scores.shape) == 1:
-            region_scores = region_scores.unsqueeze(1)  # [N, 1]
-        if len(time_scores.shape) == 1:
-            time_scores = time_scores.unsqueeze(0)      # [1, T]
-        
-        # 计算阈值
-        if self.region_threshold is None:
-            self.region_threshold = self.calculate_adaptive_threshold(region_scores)
-        if self.time_threshold is None:
-            self.time_threshold = self.calculate_adaptive_threshold(time_scores)
-        
-        # 检测异常
-        region_anomalies = (region_scores > self.region_threshold)
-        time_anomalies = (time_scores > self.time_threshold)
-        
-        # 统计异常数量
-        n_region_anomalies = region_anomalies.sum().item()
-        n_time_anomalies = time_anomalies.sum().item()
-        
-        if self.verbose:
-            print(f"检测到的区域异常数量: {n_region_anomalies}")
-            print(f"检测到的时间异常数量: {n_time_anomalies}")
-            print(f"区域阈值: {self.region_threshold:.4f}")
-            print(f"时间阈值: {self.time_threshold:.4f}")
-        
-        # 如果异常数量太少，调整阈值
-        min_anomalies = int(region_scores.numel() * self.contamination * 0.1)
-        if n_region_anomalies < min_anomalies:
-            print(f"[WARNING] 区域异常数量过少 ({n_region_anomalies} < {min_anomalies})，调整阈值")
-            self.region_threshold = torch.quantile(region_scores, 1 - self.contamination * 2)
-            region_anomalies = (region_scores > self.region_threshold)
-        
-        if n_time_anomalies < min_anomalies:
-            print(f"[WARNING] 时间异常数量过少 ({n_time_anomalies} < {min_anomalies})，调整阈值")
-            self.time_threshold = torch.quantile(time_scores, 1 - self.contamination * 2)
-            time_anomalies = (time_scores > self.time_threshold)
-        
-        # 构建异常分数矩阵
-        n_regions = region_scores.shape[0]
-        n_times = time_scores.shape[1]
-        anomaly_scores = torch.zeros((n_regions, n_times, 2))
-        
-        # 使用广播机制填充分数矩阵
-        anomaly_scores[:, :, 0] = region_scores  # [N, T]
-        anomaly_scores[:, :, 1] = time_scores   # [N, T]
-        
-        # 记录异常事件
-        anomaly_events = []
-        for i in range(n_regions):
-            for t in range(n_times):
-                if region_anomalies[i].item() or time_anomalies[0, t].item():
-                    anomaly_events.append((i, t))
-        
-        if self.verbose:
-            print(f"最终检测到的异常事件数量: {len(anomaly_events)}")
-        
-        return anomaly_events, anomaly_scores
-
-    def evaluate(self, x, y_true):
-        """评估模型性能"""
-        if isinstance(x, np.ndarray):
-            x = torch.tensor(x, dtype=torch.float).to(self.device)
-        if isinstance(y_true, np.ndarray):
-            y_true = torch.tensor(y_true, dtype=torch.float).to(self.device)
-
-        # 获取异常分数
-        output_dict = self.decision_function(x, return_dict=True)
-        anomaly_scores = output_dict['anomaly_scores']  # shape: [N, T_patch, 2]
-
-        # 转换为numpy数组进行评估
-        anomaly_scores_np = anomaly_scores.cpu().numpy()
-        y_true_np = y_true.cpu().numpy()
-
-        # 打印调试信息
-        print("[DEBUG] 输入数据形状:")
-        print(f"x shape: {x.shape}")
-        print(f"y_true shape: {y_true.shape}")
-        print(f"anomaly_scores shape: {anomaly_scores.shape}")
-
-        # 获取patch时间步数
-        N, T_patch, _ = anomaly_scores_np.shape
-        print(f"[DEBUG] 模型输出的patch时间步数: {T_patch}")
-
-        # 截取标签的前T_patch个时间步
-        if len(y_true_np.shape) == 4:  # [N, T, D, 2]
-            y_true_np_patch = y_true_np[:, :T_patch, :, :]  # 截取前T_patch个时间步
-            # 将标签reshape为[N*T_patch*D, 2]
-            y_true_flat = y_true_np_patch.reshape(-1, 2)
-            # 将分数reshape为[N*T_patch*D, 2]
-            scores_flat = np.repeat(anomaly_scores_np, y_true_np_patch.shape[2], axis=1).reshape(-1, 2)
-        else:  # [N, T, 2]
-            y_true_np_patch = y_true_np[:, :T_patch, :]
-            y_true_flat = y_true_np_patch.reshape(-1, 2)
-            scores_flat = anomaly_scores_np.reshape(-1, 2)
-
-        print(f"[DEBUG] 截取后的标签shape: {y_true_np_patch.shape}")
-        print(f"[DEBUG] 展平后的标签shape: {y_true_flat.shape}")
-        print(f"[DEBUG] 展平后的分数shape: {scores_flat.shape}")
-
-        try:
-            # 计算区域异常AUC
-            region_auc = roc_auc_score(y_true_flat[:, 0], scores_flat[:, 0])
-            # 计算时间异常AUC
-            time_auc = roc_auc_score(y_true_flat[:, 1], scores_flat[:, 1])
-            # 计算综合AUC
-            combined_auc = roc_auc_score(y_true_flat.reshape(-1), scores_flat.reshape(-1))
-
-            metrics = {
-                'region_auc': region_auc,
-                'time_auc': time_auc,
-                'combined_auc': combined_auc
-            }
-
-            if self.verbose:
-                print(f"区域AUC: {region_auc:.3f}, 时间AUC: {time_auc:.3f}, 综合AUC: {combined_auc:.3f}")
-
-            return metrics
-
-        except Exception as e:
-            print(f"评估过程中出现错误: {str(e)}")
-            print("错误详情:")
-            print(f"y_true shape: {y_true.shape}")
-            print(f"anomaly_scores shape: {anomaly_scores.shape}")
-            return {
-                'region_auc': 0.0,
-                'time_auc': 0.0,
-                'combined_auc': 0.0
-            }
-
-    def fit(self, x, mats, evaluate=None):
-        """
-        训练模型
-        Args:
-            x: 输入数据
-            mats: 距离矩阵
-            evaluate: 评估数据元组 (eval_x, eval_y)
-        Returns:
-            self
-        """
-        # 数据预处理
-        if isinstance(x, np.ndarray):
-            x_ = torch.FloatTensor(x).to(self.device)
-        else:
-            x_ = x.to(self.device)
-            
-        if isinstance(mats, np.ndarray):
-            mats = torch.FloatTensor(mats).to(self.device)
-        else:
-            mats = mats.to(self.device)
-            
-        # 初始化早停
-        self.early_stopping = EarlyStopping(
-            patience=100,
-            trace_func=tqdm.write,
-            delta=0.01,
-        )
-        
-        # 更新模型参数
-        self.model_args.update({
-            "seq_len": x_.shape[1],
-            "patch_len": self.model_args["patch_len"],
-            "stride": self.model_args["stride"],
-            "dist_mats": mats
-        })
-        
-        # 初始化模型
-        self.model = STPatch_MGCNFormer(**self.model_args).to(self.device)
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        
-        # 训练循环
-        process = range(self.epoch) if not self.verbose else tqdm(range(self.epoch))
-        for epoch in process:
-            # 训练阶段
-            self.model.train()
-            output_dict = self.model(x_, return_dict=True)
-            (patch_x, patch_recon), (score_dy, score_st) = output_dict['reconstruction'], output_dict['attention']
-            
-            # 计算损失
-            recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))
-            discrepancy = sym_kl_loss(score_dy, score_st)
-            loss = recon.mean() + discrepancy.mean()
-            
-            # 优化
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            # 评估阶段
-            if evaluate is not None:
-                self.model.eval()
-                with torch.no_grad():
-                    # 处理评估数据
-                    if isinstance(evaluate[0], np.ndarray):
-                        eval_x = torch.FloatTensor(evaluate[0]).to(self.device)
-                    else:
-                        eval_x = evaluate[0].to(self.device)
-                    
-                    # 获取评估结果
-                    metrics = self.evaluate(eval_x, evaluate[1])
-                    auc = (metrics['region_auc'] + metrics['time_auc'] + metrics['combined_auc']) / 3
-                    
-                    # 早停检查
-                    self.early_stopping(auc, self.model)
-                    if self.early_stopping.early_stop:
-                        if self.verbose:
-                            print("触发早停机制")
-                        break
-                
-                # 更新进度条
-                if self.verbose:
-                    process.set_postfix(
-                        auc=f"区域AUC: {metrics['region_auc']:.3f}, "
-                            f"时间AUC: {metrics['time_auc']:.3f}, "
-                            f"综合AUC: {metrics['combined_auc']:.3f}",
-                        refresh=True
-                    )
-            else:
-                if self.verbose:
-                    process.set_postfix(loss=f"{loss.item():.5f}", refresh=True)
-        
-        # 加载最佳模型
-        if evaluate is not None:
-            self.model.load_state_dict(torch.load(self.early_stopping.path))
-        
-        # 计算最终决策分数
-        self.model.eval()
-        output_dict = self.decision_function(x, return_dict=True)
-        self.decision_scores_ = output_dict['anomaly_scores']
-        
-        # 计算标签和阈值
-        self.labels_, self.threshold_ = predict_by_score(
-            self.decision_scores_.flatten(),
-            self.contamination,
-            True
-        )
-        
-        return self
+        output, score_dy, score_st = self.model(x)
+        recon = torch.square(output - x).mean((1, 2))
+        discrepancy = sym_kl_loss(score_st, score_dy)
+        score = recon + self.alpha * discrepancy
+        return score.cpu().numpy()
 
 
 class STAnomalyFormerDetector_v2(STAnomalyFormerDetector_v1):
@@ -1209,7 +887,7 @@ class STAnomalyFormerDetector_v3(STAnomalyFormerDetector_v2):
                          log_interval, **kwargs)
         self.beta = beta
 
-    def fit(self, x, mat, evaluate=None):
+    def fit(self, x, mat, y=None):
         x_ = torch.FloatTensor(x).to(self.device)
         mat = torch.FloatTensor(mat).to(self.device)
         self.model = STAnomalyFormer_v2(
@@ -1229,6 +907,7 @@ class STAnomalyFormerDetector_v3(STAnomalyFormerDetector_v2):
             output, td1, td2, score_dy, score_st = self.model(x_)
 
             recon = torch.square(output - x_).mean((1, 2))
+            # recon = region_wise_smooth_l1_loss(output, x_)
             discrepancy1 = sym_kl_loss(td1, td2.detach()) - sym_kl_loss(
                 td1.detach(), td2)
             discrepancy2 = sym_kl_loss(
@@ -1241,36 +920,40 @@ class STAnomalyFormerDetector_v3(STAnomalyFormerDetector_v2):
             loss.backward()
             optimizer.step()
 
-            if evaluate is not None:
-                output_dict = self.decision_function(evaluate[0], return_dict=True)
-                score = output_dict['anomaly_scores']
-                # 将二维标签展平为一维
-                y_true = evaluate[1].flatten()
-                # 确保score的维度与标签匹配
-                if isinstance(score, np.ndarray):
-                    score = score.flatten()
-                else:
-                    score = score.reshape(-1)
-                print(f"[DEBUG] y_true.shape: {y_true.shape}, score.shape: {score.shape}")
-                assert y_true.shape == score.shape, f"标签和分数长度不一致: y_true.shape={y_true.shape}, score.shape={score.shape}"
-                auc = roc_auc_score(y_true, score)
-                self.early_stopping(auc, self.model)
+            self.model.eval()
+            with torch.no_grad():
+                output, _, _, score_dy, score_st = self.model(x_)
 
-                if self.is_early_stopping and self.early_stopping.early_stop:
-                    break
+                recon = torch.square(output - x_).mean((1, 2))
+                # recon = region_wise_smooth_l1_loss(output, x_)
+                discrepancy = sym_kl_loss(score_dy, score_st)
+                score = recon + self.alpha * discrepancy
+                loss = score.mean()
+
+            # log = "Epoch {:3d}, loss={:5.6f}".format(
+            #     epoch,
+            #     loss.item(),
+            # )
+            if y is not None:
+                auc = roc_auc_score(y, score.cpu().numpy())
+                # log += ", AUC={:6f}".format(auc)
+                if auc >= max_auc:
+                    max_auc = auc
+                    self.model_copy = deepcopy(self.model)
 
             if self.verbose:
-                if evaluate is not None:
+                # if (epoch + 1) % self.log_interval == 0:
+                #     print(log)
+                if y is not None:
                     process.set_postfix(
-                        auc=f"区域AUC: {metrics['region_auc']:.3f}, "
-                            f"时间AUC: {metrics['time_auc']:.3f}, "
-                            f"综合AUC: {metrics['combined_auc']:.3f}",
+                        stat="max: {:.4f}, current: {:.4f}".format(
+                            max_auc, auc),
                         refresh=True,
                     )
-                else:
-                    process.set_postfix(loss=f"{loss.item():.5f}", refresh=True)
-        self.model.load_state_dict(torch.load(self.early_stopping.path))
-        self.model.eval()
+
+        if y is not None:
+            self.model = self.model_copy
+
         self.decision_scores_ = self.decision_function(x)
         self.labels_, self.threshold_ = predict_by_score(
             self.decision_scores_,
@@ -1283,8 +966,9 @@ class STAnomalyFormerDetector_v3(STAnomalyFormerDetector_v2):
     @torch.no_grad()
     def decision_function(self, x):
         x = torch.tensor(x, dtype=torch.float).to(self.device)
-        output, score_dy, score_st = self.model(x)
+        output, _, _, score_dy, score_st = self.model(x)
         recon = torch.square(output - x).mean((1, 2))
+        # recon = region_wise_smooth_l1_loss(output, x)
         discrepancy = sym_kl_loss(score_dy, score_st)
         score = recon + self.alpha * discrepancy
         return score.cpu().numpy()
@@ -1307,7 +991,6 @@ class STAnomalyFormerDetector_v4(STAnomalyFormerDetector_v3):
         contamination=0.1,
         verbose: bool = False,
         log_interval: int = 1,
-        threshold_method: str = 'quantile',
         **kwargs,
     ):
         super().__init__(
@@ -1328,356 +1011,461 @@ class STAnomalyFormerDetector_v4(STAnomalyFormerDetector_v3):
             log_interval,
             **kwargs,
         )
-        self.threshold_method = threshold_method
         self.loss_weight = torch.ones(3) / 3
+
+    def fit(self, x, mat, evaluate=None):
+        x_ = torch.FloatTensor(x).to(self.device)
+        mat = torch.FloatTensor(mat).to(self.device)
+        self.early_stopping = EarlyStopping(50, trace_func=tqdm.write)
+        self.model = STAnomalyFormer_v2(
+            mat.to(self.device),
+            n_gcn=self.n_gcn,
+            **self.tsfm_args,
+        ).to(self.device)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        process = range(self.epoch) if not self.verbose else tqdm(
+            range(self.epoch))
+
+        for epoch in process:
+            self.model.train()
+            output, td1, td2, score_dy, score_st = self.model(x_)
+
+            recon = torch.square(output - x_).mean((1, 2))
+            discrepancy1 = sym_kl_loss(td1, td2.detach()) - sym_kl_loss(
+                td1.detach(), td2)
+            discrepancy2 = sym_kl_loss(
+                score_dy,
+                score_st.detach(),
+            ) - sym_kl_loss(score_dy.detach(), score_st)
+            score = (loss1 := self.loss_weight[0] *
+                     recon) + self.loss_weight[1] * discrepancy2
+
+            with torch.no_grad():
+                loss1 = recon.mean()
+                loss2 = discrepancy2.mean()
+            loss3 = discrepancy1.mean()
+
+            loss = score.mean() + self.loss_weight[2] * loss3
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            self.update_weight(loss1.item(), loss2.item(), loss3.item())
+
+            if evaluate is not None:
+                test_X, test_y = evaluate
+                test_x = torch.FloatTensor(test_X).to(self.device)
+                self.model.eval()
+                with torch.no_grad():
+                    output, _, _, score_dy, score_st = self.model(test_x)
+
+                    recon = torch.square(output - test_x).mean((1, 2))
+                    discrepancy = sym_kl_loss(score_dy, score_st)
+                    score = self.loss_weight[0] * recon + \
+                        self.loss_weight[1] * discrepancy
+                    loss = score.mean()
+
+                auc = roc_auc_score(test_y, score.cpu().numpy())
+                self.early_stopping(auc, self.model)
+
+                if self.early_stopping.early_stop:
+                    break
+
+            if self.verbose:
+                if evaluate is not None:
+                    process.set_postfix(
+                        max_auc="max: {:.4f}, current: {:.4f}".format(
+                            self.early_stopping.val_score_max, auc),
+                        refresh=True,
+                    )
+                else:
+                    process.set_postfix(
+                        max_auc="loss: {:.5f}".format(loss.item()),
+                        refresh=True,
+                    )
+
+        self.model.load_state_dict(torch.load(self.early_stopping.path))
+        self.model.eval()
+        self.decision_scores_ = self.decision_function(x)
+        self.labels_, self.threshold_ = predict_by_score(
+            self.decision_scores_,
+            self.contamination,
+            True,
+        )
+
+        return self
+
+    @torch.no_grad()
+    def update_weight(self, loss1, loss2, loss3):
+        exp = torch.tensor([-loss1, -loss2, -loss3]).exp()
+        new_weight = self.loss_weight * exp
+        self.loss_weight = new_weight / torch.sum(new_weight)
+
+    @torch.no_grad()
+    def decision_function(self, x):
+        x = torch.tensor(x, dtype=torch.float).to(self.device)
+        output, _, _, score_dy, score_st = self.model(x)
+        recon = torch.square(output - x).mean((1, 2))
+        discrepancy = sym_kl_loss(score_dy, score_st)
+        score = self.loss_weight[0] * recon + self.loss_weight[1] * discrepancy
+        return score.cpu().numpy()
+
+
+class STPatchFormerDetector(BaseDetector):
+
+    def __init__(
+        self,
+        seq_len: int,
+        patch_len: int,
+        stride: int,
+        d_in: int,
+        d_model: int,
+        n_heads: int,
+        temporal_half: bool = False,
+        spatial_half: bool = False,
+        n_gcn: int = 3,
+        device: str = 'cuda',
+        epoch: int = 50,
+        lr: float = 0.001,
+        early_stopping: bool = False,
+        use_recon: bool = True,
+        use_const: bool = True,
+        diff_const: bool = True,
+        static_only=False,
+        dynamic_only=False,
+        contamination: float = 0.1,
+        verbose: bool = False,
+    ):
+        super().__init__(contamination)
         self.model_args = {
-            "seq_len": 144,
-            "patch_len": 12,
-            "stride": 6,
+            "seq_len": seq_len,
+            "patch_len": patch_len,
+            "stride": stride,
             "d_in": d_in,
             "d_model": d_model,
             "n_heads": n_heads,
             "n_gcn": n_gcn,
-            "temporal_half": False,
-            "spatial_half": False,
-            "static_only": False,
-            "dynamic_only": False,
-            "temperature": 50.0,
-            "anormly_ratio": contamination
+            "temporal_half": temporal_half,
+            "spatial_half": spatial_half,
+            "static_only": static_only,
+            "dynamic_only": dynamic_only,
         }
-        self.region_threshold = None
-        self.time_threshold = None
+        self.device = device
+        self.epoch = epoch
+        self.lr = lr
+        self.is_early_stopping = early_stopping
+        self.verbose = verbose
+        self.use_recon = use_recon
+        self.use_const = use_const
+        self.diff_const = diff_const
+        assert self.use_recon or self.use_const
 
-    def calculate_adaptive_threshold(self, scores, contamination=None):
-        if contamination is None:
-            contamination = self.contamination
-            
-        scores = scores.detach().cpu()
-        
-        # 添加调试信息
-        if self.verbose:
-            print(f"[DEBUG] 计算阈值:")
-            print(f"分数形状: {scores.shape}")
-            print(f"分数范围: [{scores.min():.4f}, {scores.max():.4f}]")
-            print(f"分数均值: {scores.mean():.4f}")
-            print(f"分数标准差: {scores.std():.4f}")
-        
-        # 确保分数不为全0
-        if torch.all(scores == 0):
-            print("[WARNING] 所有分数都为0，使用默认阈值")
-            return torch.tensor(0.5)
-        
-        if self.threshold_method == 'quantile':
-            # 使用更保守的分位数
-            threshold = torch.quantile(scores, 1 - contamination * 1.5)
-        elif self.threshold_method == 'mean':
-            # 使用均值加标准差的方法
-            mean = scores.mean()
-            std = scores.std()
-            threshold = mean + std * (1 - contamination)
-        elif self.threshold_method == 'max':
-            # 使用最大值的百分比
-            max_score = scores.max()
-            threshold = max_score * (1 - contamination)
-        else:
-            raise ValueError(f"不支持的阈值计算方法: {self.threshold_method}")
-        
-        # 确保阈值不为0
-        threshold = max(threshold, scores.mean() * 0.1)
-        
-        if self.verbose:
-            print(f"计算得到的阈值: {threshold:.4f}")
-            
-        return threshold
+        self.loss_weight = torch.ones(2) / 2
 
-    def detect_anomalies(self, region_scores, time_scores):
-        region_scores = region_scores.detach().cpu()
-        time_scores = time_scores.detach().cpu()
-        
-        # 添加调试信息
-        if self.verbose:
-            print(f"[DEBUG] 检测异常:")
-            print(f"区域分数形状: {region_scores.shape}")
-            print(f"时间分数形状: {time_scores.shape}")
-            print(f"区域分数范围: [{region_scores.min():.4f}, {region_scores.max():.4f}]")
-            print(f"时间分数范围: [{time_scores.min():.4f}, {time_scores.max():.4f}]")
-        
-        # 确保分数维度正确
-        if len(region_scores.shape) == 1:
-            region_scores = region_scores.unsqueeze(1)  # [N, 1]
-        if len(time_scores.shape) == 1:
-            time_scores = time_scores.unsqueeze(0)      # [1, T]
-        
-        # 计算阈值
-        if self.region_threshold is None:
-            self.region_threshold = self.calculate_adaptive_threshold(region_scores)
-        if self.time_threshold is None:
-            self.time_threshold = self.calculate_adaptive_threshold(time_scores)
-        
-        # 检测异常
-        region_anomalies = (region_scores > self.region_threshold)
-        time_anomalies = (time_scores > self.time_threshold)
-        
-        # 统计异常数量
-        n_region_anomalies = region_anomalies.sum().item()
-        n_time_anomalies = time_anomalies.sum().item()
-        
-        if self.verbose:
-            print(f"检测到的区域异常数量: {n_region_anomalies}")
-            print(f"检测到的时间异常数量: {n_time_anomalies}")
-            print(f"区域阈值: {self.region_threshold:.4f}")
-            print(f"时间阈值: {self.time_threshold:.4f}")
-        
-        # 如果异常数量太少，调整阈值
-        min_anomalies = int(region_scores.numel() * self.contamination * 0.1)
-        if n_region_anomalies < min_anomalies:
-            print(f"[WARNING] 区域异常数量过少 ({n_region_anomalies} < {min_anomalies})，调整阈值")
-            self.region_threshold = torch.quantile(region_scores, 1 - self.contamination * 2)
-            region_anomalies = (region_scores > self.region_threshold)
-        
-        if n_time_anomalies < min_anomalies:
-            print(f"[WARNING] 时间异常数量过少 ({n_time_anomalies} < {min_anomalies})，调整阈值")
-            self.time_threshold = torch.quantile(time_scores, 1 - self.contamination * 2)
-            time_anomalies = (time_scores > self.time_threshold)
-        
-        # 构建异常分数矩阵
-        n_regions = region_scores.shape[0]
-        n_times = time_scores.shape[1]
-        anomaly_scores = torch.zeros((n_regions, n_times, 2))
-        
-        # 使用广播机制填充分数矩阵
-        anomaly_scores[:, :, 0] = region_scores  # [N, T]
-        anomaly_scores[:, :, 1] = time_scores   # [N, T]
-        
-        # 记录异常事件
-        anomaly_events = []
-        for i in range(n_regions):
-            for t in range(n_times):
-                if region_anomalies[i].item() or time_anomalies[0, t].item():
-                    anomaly_events.append((i, t))
-        
-        if self.verbose:
-            print(f"最终检测到的异常事件数量: {len(anomaly_events)}")
-        
-        return anomaly_events, anomaly_scores
-
-    @torch.no_grad()
-    def decision_function(self, x, return_dict=False):
-        self.model.eval()
-        x = torch.tensor(x, dtype=torch.float).to(self.device)
-        
-        output_dict = self.model(x, return_dict=True)
-        
-        region_scores = output_dict['region_scores']
-        time_scores = output_dict['time_scores']
-        
-        anomaly_events, anomaly_scores = self.detect_anomalies(region_scores, time_scores)
-        
-        if return_dict:
-            return {
-                'anomaly_scores': anomaly_scores,
-                'region_scores': region_scores,
-                'time_scores': time_scores,
-                'anomaly_events': anomaly_events,
-                'region_threshold': self.region_threshold,
-                'time_threshold': self.time_threshold
-            }
-        else:
-            return anomaly_scores.cpu().numpy()
-
-    def evaluate(self, x, y_true):
-        """评估模型性能"""
-        if isinstance(x, np.ndarray):
-            x = torch.tensor(x, dtype=torch.float).to(self.device)
-        if isinstance(y_true, np.ndarray):
-            y_true = torch.tensor(y_true, dtype=torch.float).to(self.device)
-
-        # 获取异常分数
-        output_dict = self.decision_function(x, return_dict=True)
-        anomaly_scores = output_dict['anomaly_scores']  # shape: [N, T_patch, 2]
-
-        # 转换为numpy数组进行评估
-        anomaly_scores_np = anomaly_scores.cpu().numpy()
-        y_true_np = y_true.cpu().numpy()
-
-        # 打印调试信息
-        print("[DEBUG] 输入数据形状:")
-        print(f"x shape: {x.shape}")
-        print(f"y_true shape: {y_true.shape}")
-        print(f"anomaly_scores shape: {anomaly_scores.shape}")
-
-        # 获取patch时间步数
-        N, T_patch, _ = anomaly_scores_np.shape
-        print(f"[DEBUG] 模型输出的patch时间步数: {T_patch}")
-
-        # 截取标签的前T_patch个时间步
-        if len(y_true_np.shape) == 4:  # [N, T, D, 2]
-            y_true_np_patch = y_true_np[:, :T_patch, :, :]  # 截取前T_patch个时间步
-            # 将标签reshape为[N*T_patch*D, 2]
-            y_true_flat = y_true_np_patch.reshape(-1, 2)
-            # 将分数reshape为[N*T_patch*D, 2]
-            scores_flat = np.repeat(anomaly_scores_np, y_true_np_patch.shape[2], axis=1).reshape(-1, 2)
-        else:  # [N, T, 2]
-            y_true_np_patch = y_true_np[:, :T_patch, :]
-            y_true_flat = y_true_np_patch.reshape(-1, 2)
-            scores_flat = anomaly_scores_np.reshape(-1, 2)
-
-        print(f"[DEBUG] 截取后的标签shape: {y_true_np_patch.shape}")
-        print(f"[DEBUG] 展平后的标签shape: {y_true_flat.shape}")
-        print(f"[DEBUG] 展平后的分数shape: {scores_flat.shape}")
-
-        try:
-            # 计算区域异常AUC
-            region_auc = roc_auc_score(y_true_flat[:, 0], scores_flat[:, 0])
-            # 计算时间异常AUC
-            time_auc = roc_auc_score(y_true_flat[:, 1], scores_flat[:, 1])
-            # 计算综合AUC
-            combined_auc = roc_auc_score(y_true_flat.reshape(-1), scores_flat.reshape(-1))
-
-            metrics = {
-                'region_auc': region_auc,
-                'time_auc': time_auc,
-                'combined_auc': combined_auc
-            }
-
-            if self.verbose:
-                print(f"区域AUC: {region_auc:.3f}, 时间AUC: {time_auc:.3f}, 综合AUC: {combined_auc:.3f}")
-
-            return metrics
-
-        except Exception as e:
-            print(f"评估过程中出现错误: {str(e)}")
-            print("错误详情:")
-            print(f"y_true shape: {y_true.shape}")
-            print(f"anomaly_scores shape: {anomaly_scores.shape}")
-            return {
-                'region_auc': 0.0,
-                'time_auc': 0.0,
-                'combined_auc': 0.0
-            }
-
-    def fit(self, x, mats, evaluate=None):
-        """
-        训练模型
-        Args:
-            x: 输入数据
-            mats: 距离矩阵
-            evaluate: 评估数据元组 (eval_x, eval_y)
-        Returns:
-            self
-        """
-        # 数据预处理
-        if isinstance(x, np.ndarray):
-            x_ = torch.FloatTensor(x).to(self.device)
-        else:
-            x_ = x.to(self.device)
-            
-        if isinstance(mats, np.ndarray):
-            mats = torch.FloatTensor(mats).to(self.device)
-        else:
-            mats = mats.to(self.device)
-            
-        # 初始化早停
+    def fit(self, x, mat, evaluate=None):
+        x_ = torch.FloatTensor(x).to(self.device)
+        mat = torch.FloatTensor(mat).to(self.device)
         self.early_stopping = EarlyStopping(
-            patience=100,
+            100,
             trace_func=tqdm.write,
             delta=0.01,
         )
-        
-        # 更新模型参数
-        self.model_args.update({
-            "seq_len": x_.shape[1],
-            "patch_len": self.model_args["patch_len"],
-            "stride": self.model_args["stride"],
-            "dist_mats": mats
-        })
-        
-        # 初始化模型
-        self.model = STPatch_MGCNFormer(**self.model_args).to(self.device)
+        self.model = STPatchFormer(
+            dist_mat=mat.to(self.device),
+            **self.model_args,
+        ).to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        process = range(self.epoch) if not self.verbose else tqdm(
+            range(self.epoch))
 
-        # 训练循环
-        process = range(self.epoch) if not self.verbose else tqdm(range(self.epoch))
         for epoch in process:
-            # 训练阶段
             self.model.train()
-            output_dict = self.model(x_, return_dict=True)
-            (patch_x, patch_recon), (score_dy, score_st) = output_dict['reconstruction'], output_dict['attention']
-            
-            # 计算损失
+            (patch_x, patch_recon), (score_dy, score_st) = self.model(x_)
+            if self.use_recon:
+                recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))
+                loss1 = self.loss_weight[0] * recon.mean()
+            if self.use_const:
+                if self.diff_const:
+                    discrepancy = sym_kl_loss(score_dy,
+                                              score_st.detach()) - sym_kl_loss(
+                                                  score_dy.detach(), score_st)
+                else:
+                    discrepancy = sym_kl_loss(score_dy, score_st)
+                loss2 = self.loss_weight[1] * discrepancy.mean()
+
+            optimizer.zero_grad()
+            if self.use_recon and not self.use_const:
+                loss = loss1
+            elif self.use_const and not self.use_recon:
+                loss = loss2
+            else:
+                loss = loss1 + loss2
+                self.update_weight(loss1.item(), loss2.item())
+
+            loss.backward()
+            optimizer.step()
+
+            if evaluate is not None:
+                auc = roc_auc_score(
+                    evaluate[1],
+                    self.decision_function(evaluate[0]),
+                )
+                self.early_stopping(auc, self.model)
+
+                if self.is_early_stopping and self.early_stopping.early_stop:
+                    # print("Early stopping")
+                    break
+
+            if self.verbose:
+                if evaluate is not None:
+                    process.set_postfix(
+                        max_auc="AUC: {:.3f}/{:.3f}, weight : {:.3f}".format(
+                            auc, self.early_stopping.best_score,
+                            self.loss_weight[0]),
+                        refresh=True,
+                    )
+                else:
+                    process.set_postfix(
+                        max_auc="loss: {:.5f}".format(loss.item()),
+                        refresh=True,
+                    )
+        self.model.load_state_dict(torch.load(self.early_stopping.path))
+        self.model.eval()
+        self.decision_scores_ = self.decision_function(x)
+        self.labels_, self.threshold_ = predict_by_score(
+            self.decision_scores_,
+            self.contamination,
+            True,
+        )
+        return self
+
+    @torch.no_grad()
+    def update_weight(self, loss1, loss2):
+        exp = torch.tensor([-loss1, -loss2]).exp()
+        new_weight = self.loss_weight * exp
+        self.loss_weight = new_weight / torch.sum(new_weight)
+
+    @torch.no_grad()
+    def decision_function(self, x):
+        self.model.eval()
+        x = torch.tensor(x, dtype=torch.float).to(self.device)
+        (patch_x, patch_recon), (score_dy, score_st) = self.model(x)
+        if self.use_recon:
             recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))
+            score1 = self.loss_weight[0] * recon
+        if self.use_const:
             discrepancy = sym_kl_loss(score_dy, score_st)
-            loss = recon.mean() + discrepancy.mean()
-            
-            # 优化
+            score2 = self.loss_weight[1] * discrepancy
+
+        if self.use_recon and not self.use_const:
+            score = score1
+        elif self.use_const and not self.use_recon:
+            score = score2
+        else:
+            score = score1 + score2
+        return score.cpu().numpy()
+
+    def predict(self, x):
+        score = self.decision_function(x)
+        return predict_by_score(score, 1 - self.contamination)
+
+
+class STPMFormerDector(STPatchFormerDetector):
+
+    def __init__(self,
+                 seq_len: int,
+                 patch_len: int,
+                 stride: int,
+                 d_in: int,
+                 d_model: int,
+                 n_heads: int,
+                 n_gcn: int = 3,
+                 temporal_half: bool = False,
+                 spatial_half: bool = False,
+                 mask_ratio: float = 0.4,
+                 device: str = 'cuda',
+                 epoch: int = 50,
+                 lr: float = 0.001,
+                 contamination: float = 0.1,
+                 verbose: bool = False):
+        super().__init__(seq_len, patch_len, stride, d_in, d_model, n_heads,
+                         temporal_half, spatial_half, n_gcn, device, epoch, lr,
+                         contamination, verbose)
+        self.model_args['mask_ratio'] = mask_ratio
+
+    def fit(self, x, mat, evaluate=None):
+        x_ = torch.FloatTensor(x).to(self.device)
+        mat = torch.FloatTensor(mat).to(self.device)
+        self.early_stopping = EarlyStopping(100, trace_func=tqdm.write)
+        self.model = STPatchMaskFormer(
+            dist_mat=mat.to(self.device),
+            **self.model_args,
+        ).to(self.device)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        process = range(self.epoch) if not self.verbose else tqdm(
+            range(self.epoch))
+
+        for epoch in process:
+            self.model.train()
+            (patch_x, patch_recon), (score_dy, score_st) = self.model(x_)
+            mask = self.model.random_mask.mask
+            recon_loss = torch.abs(patch_x - patch_recon).mean(-2)
+            loss1 = (recon_loss * mask).sum() / mask.sum()
+            loss2 = sym_kl_loss(score_dy, score_st).sum()
+            loss = self.loss_weight[0] * loss1 + self.loss_weight[1] * loss2
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # 评估阶段
-            if evaluate is not None:
-                self.model.eval()
-                with torch.no_grad():
-                    # 处理评估数据
-                    if isinstance(evaluate[0], np.ndarray):
-                        eval_x = torch.FloatTensor(evaluate[0]).to(self.device)
-                    else:
-                        eval_x = evaluate[0].to(self.device)
-                        
-                    # 获取评估结果
-                    metrics = self.evaluate(eval_x, evaluate[1])
-                    auc = (metrics['region_auc'] + metrics['time_auc'] + metrics['combined_auc']) / 3
-                    
-                    # 早停检查
-                    self.early_stopping(auc, self.model)
-                    if self.early_stopping.early_stop:
-                        if self.verbose:
-                            print("触发早停机制")
-                        break
+            self.update_weight(loss1.item(), loss2.item())
 
-                # 更新进度条
-                if self.verbose:
+            if evaluate is not None:
+                auc = roc_auc_score(
+                    evaluate[1],
+                    self.decision_function(evaluate[0]),
+                )
+                self.early_stopping(auc, self.model)
+
+                if self.early_stopping.early_stop:
+                    print("Early stopping")
+                    break
+
+            if self.verbose:
+                if evaluate is not None:
                     process.set_postfix(
-                        auc=f"区域AUC: {metrics['region_auc']:.3f}, "
-                            f"时间AUC: {metrics['time_auc']:.3f}, "
-                            f"综合AUC: {metrics['combined_auc']:.3f}",
-                        refresh=True
+                        max_auc="max: {:.4f}, current: {:.4f}".format(
+                            self.early_stopping.val_score_max, auc),
+                        refresh=True,
                     )
-            else:
-                if self.verbose:
-                    process.set_postfix(loss=f"{loss.item():.5f}", refresh=True)
-        
-        # 加载最佳模型
-        if evaluate is not None:
-            self.model.load_state_dict(torch.load(self.early_stopping.path))
-            
-        # 计算最终决策分数
+                else:
+                    process.set_postfix(
+                        max_auc="loss: {:.5f}".format(loss.item()),
+                        refresh=True,
+                    )
+        self.model.load_state_dict(torch.load(self.early_stopping.path))
         self.model.eval()
-        output_dict = self.decision_function(x, return_dict=True)
-        self.decision_scores_ = output_dict['anomaly_scores']
-        
-        # 计算标签和阈值
+        self.decision_scores_ = self.decision_function(x)
         self.labels_, self.threshold_ = predict_by_score(
-            self.decision_scores_.flatten(),
+            self.decision_scores_,
             self.contamination,
-            True
+            True,
         )
-        
         return self
 
-# 在文件末尾添加
-__all__ = [
-    'TemporalTSFMDetector',
-    'SpatialTSFMDetector',
-    'DOMINANTDetector',
-    'AnomalyDAEDetector',
-    'OCGNNDetector',
-    'LSTM_AEDetector',
-    'STAnomalyFormerDetector_v1',
-    'STAnomalyFormerDetector_v2',
-    'STAnomalyFormerDetector_v3',
-    'STAnomalyFormerDetector_v4',
-    'STPatchFormerDetector',
-    'STPMFormerDector',
-    'STPatch_MGCNDetector'
-]
+    @torch.no_grad()
+    def decision_function(self, x):
+        self.model.eval()
+        x = torch.tensor(x, dtype=torch.float).to(self.device)
+        (patch_x, patch_recon), (score_dy, score_st) = self.model(x)
+        recon = torch.abs(patch_x - patch_recon).mean(-2).sum((-1, -2))
+        discrepancy = sym_kl_loss(score_dy, score_st)
+        score = self.loss_weight[0] * recon + self.loss_weight[1] * discrepancy
+        return score.cpu().numpy()
+
+
+class STPatch_MGCNDetector(STPatchFormerDetector):
+
+    def __init__(
+        self,
+        seq_len: int,
+        patch_len: int,
+        stride: int,
+        d_in: int,
+        d_model: int,
+        n_heads: int,
+        temporal_half: bool = False,
+        spatial_half: bool = False,
+        n_gcn: int = 3,
+        device: str = 'cuda',
+        epoch: int = 50,
+        lr: float = 0.001,
+        early_stopping: bool = False,
+        contamination: float = 0.1,
+        use_recon: bool = True,
+        use_const: bool = True,
+        diff_const: bool = True,
+        static_only=False,
+        dynamic_only=False,
+        verbose: bool = False,
+    ):
+        super().__init__(seq_len, patch_len, stride, d_in, d_model, n_heads,
+                         temporal_half, spatial_half, n_gcn, device, epoch, lr,
+                         early_stopping, use_recon, use_const, diff_const,
+                         static_only, dynamic_only, contamination, verbose)
+
+    def fit(self, x, mats, evaluate=None):
+        x_ = torch.FloatTensor(x).to(self.device)
+        mats = torch.FloatTensor(mats).to(self.device)
+        self.early_stopping = EarlyStopping(
+            100,
+            trace_func=tqdm.write,
+            delta=0.01,
+        )
+        self.model = STPatch_MGCNFormer(
+            dist_mats=mats.to(self.device),
+            **self.model_args,
+        ).to(self.device)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        process = range(self.epoch) if not self.verbose else tqdm(
+            range(self.epoch))
+
+        for epoch in process:
+            self.model.train()
+            # (score_dy, score_st) = self.model(x_, return_recon=False)
+            (patch_x, patch_recon), (score_dy, score_st) = self.model(x_)
+            if self.use_recon:
+                recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))
+                loss1 = self.loss_weight[0] * recon.mean()
+            if self.use_const:
+                if self.diff_const:
+                    discrepancy = sym_kl_loss(score_dy,
+                                              score_st.detach()) - sym_kl_loss(
+                                                  score_dy.detach(), score_st)
+                else:
+                    discrepancy = sym_kl_loss(score_dy, score_st)
+                loss2 = self.loss_weight[1] * discrepancy.mean()
+            optimizer.zero_grad()
+            # with torch.autograd.detect_anomaly():
+            if self.use_recon and not self.use_const:
+                loss = loss1
+            elif self.use_const and not self.use_recon:
+                loss = loss2
+            else:
+                loss = loss1 + loss2
+                self.update_weight(loss1.item(), loss2.item())
+            loss.backward()
+            # nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=20, norm_type=2)
+            optimizer.step()
+
+            if evaluate is not None:
+                auc = roc_auc_score(
+                    evaluate[1],
+                    self.decision_function(evaluate[0]),
+                )
+                self.early_stopping(auc, self.model)
+
+                if self.is_early_stopping and self.early_stopping.early_stop:
+                    # print("Early stopping")
+                    break
+
+            if self.verbose:
+                if evaluate is not None:
+                    process.set_postfix(
+                        max_auc="AUC: {:.3f}/{:.3f}, weight : {:.3f}".format(
+                            auc, self.early_stopping.best_score,
+                            self.loss_weight[0]),
+                        refresh=True,
+                    )
+                else:
+                    process.set_postfix(
+                        max_auc="loss: {:.5f}".format(loss.item()),
+                        refresh=True,
+                    )
+        self.model.load_state_dict(torch.load(self.early_stopping.path))
+        self.model.eval()
+        self.decision_scores_ = self.decision_function(x)
+        self.labels_, self.threshold_ = predict_by_score(
+            self.decision_scores_,
+            self.contamination,
+            True,
+        )
+        return self

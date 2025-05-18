@@ -239,15 +239,24 @@ class MultipleGCN(nn.Module):
         # 距离为0的位置设为1
         matrix = (self.matrices.cpu().detach().numpy() == 0.).astype(int)
         # 对角线设为0
-        matrix[:, range(matrix.shape[0]), range(matrix.shape[0])] = 0
+        matrix[:, range(matrix.shape[1]), range(matrix.shape[1])] = 0
         return torch.Tensor(matrix) == 1
 
     def forward(self, x):
-        prior = self.STS
+        # x: (VAR * NP, N, D)
+        B, N, D = x.shape
+        prior = self.STS  # (N, N)
+        
+        # 重塑x以适应矩阵乘法
+        x_reshaped = x.reshape(-1, N, D)  # (B, N, D)
+        
         for i in range(self.n_layers):
-            wx = prior @ x
-            x = self.activation(self.linears[i](wx))
-
+            # 执行矩阵乘法
+            wx = torch.matmul(prior, x_reshaped)  # (B, N, D)
+            x_reshaped = self.activation(self.linears[i](wx))
+        
+        # 恢复原始形状
+        x = x_reshaped.reshape(B, N, D)
         return x, prior
 
     @property
@@ -255,13 +264,18 @@ class MultipleGCN(nn.Module):
         sigma = self.sigma.weight.reshape(self.n_graph, 1, -1)
         sigma = torch.sigmoid(sigma * 5) + 1e-5
         sigma = torch.pow(3, sigma) - 1
-        # print(self.matrices.min(), self.matrices.max())
+        
+        # 计算每个图的先验概率
         exp = torch.exp(-self.matrices / (2 * sigma**2))
         prior = exp / (math.sqrt(2 * math.pi) * sigma)
         prior = prior.masked_fill(self.mask.to(exp.device), 0)
-        prior /= prior.sum(1, keepdims=True) + 1e-8
-        prior = prior.permute(1, 2, 0) @ torch.softmax(self.alpha, 0)
-        return prior
+        
+        # 归一化
+        prior = prior / (prior.sum(1, keepdims=True) + 1e-8)
+        
+        # 合并多个图的先验概率
+        prior = torch.matmul(prior.permute(1, 2, 0), torch.softmax(self.alpha, 0))
+        return prior  # (N, N)
 
 
 def MLP(

@@ -1,10 +1,5 @@
 import torch
 from torch import nn
-import numpy as np
-
-def kl_loss(p, q):
-    res = p * (torch.log(p + 1e-8) - torch.log(q + 1e-8))
-    return res  # 不取平均，保持维度信息
 
 from .embed import TemporalEmbedding
 from .module import (
@@ -53,12 +48,11 @@ class STAnomalyFormer_v1(nn.Module):
         self.proj1 = nn.Linear(d_model, d_in)
         self.proj2 = nn.Linear(d_model, d_in)
 
-    def forward(self, x, return_dict=False):
+    def forward(self, x):
         # temporal part
         x = self.embed(x)
         # x = self.auto_corr(x, x)[0]
-        x, attn1 = self.temporal_attn(x, x)
-        x = self.norm1(self.dropout(x))
+        x = self.norm1(self.dropout(x + self.temporal_attn(x, x)[0]))
 
         x = x.swapaxes(0, 1)
         # dynamic spatial part
@@ -72,26 +66,11 @@ class STAnomalyFormer_v1(nn.Module):
         output_dy, output_st = self.proj1(output_dy), self.proj2(output_st)
         g = torch.sigmoid(output_dy + output_st)
         output = g * output_dy + (1 - g) * output_st
+        # output = output_dy + output_st
         output = output.swapaxes(0, 1)
         score_dy = score_dy.mean(0)
-        score_st = score_st.mean(0)
 
-        # 计算区域异常分数（空间维度）
-        region_scores = score_st.mean(dim=1)  # 对每个区域的所有时间点取平均
-        # 计算时间异常分数（时间维度）
-        time_scores = score_dy.mean(dim=0)  # 对每个时间点的所有区域取平均
-
-        if return_dict:
-            return {
-                'reconstruction': (x, output),
-                'attention': (attn1.mean(0), score_st),
-                'region_scores': region_scores,
-                'time_scores': time_scores,
-                'score_dy': score_dy,
-                'score_st': score_st
-            }
-        else:
-            return output, score_dy, score_st
+        return output, score_dy, score_st
 
 
 class STAnomalyFormer_v2(STAnomalyFormer_v1):
@@ -118,7 +97,7 @@ class STAnomalyFormer_v2(STAnomalyFormer_v1):
         )
         self.revin = RevIN(d_in)
 
-    def forward(self, x, return_dict=False):
+    def forward(self, x):
         x = self.revin(x, 'norm')
         x1 = self.embed(x)
         branch1 = x1
@@ -144,29 +123,14 @@ class STAnomalyFormer_v2(STAnomalyFormer_v1):
         output = output.swapaxes(0, 1)
         score_dy = score_dy.mean(0)
 
-        if return_dict:
-            # 计算区域异常分数（空间维度）
-            region_scores = score_st.mean(dim=1)  # 对每个区域的所有时间点取平均
-            
-            # 计算时间异常分数（时间维度）
-            time_scores = score_dy.mean(dim=0)  # 对每个时间点的所有区域取平均
-            
-            return {
-                'reconstruction': self.revin(output, 'denorm'),
-                'attention': (attn1.mean(0), attn2.mean(0)),
-                'region_scores': region_scores,
-                'time_scores': time_scores,
-                'score_dy': score_dy,
-                'score_st': score_st
-            }
-        else:
-            return (
-                self.revin(output, 'denorm'),
-                attn1.mean(0),
-                attn2.mean(0),
-                score_dy,
-                score_st,
-            )
+        return (
+            self.revin(output, 'denorm'),
+            # output,
+            attn1.mean(0),
+            attn2.mean(0),
+            score_dy,
+            score_st,
+        )
 
 
 from .patch import Patch, PatchEncoder, RandomMasking
@@ -291,16 +255,12 @@ class STPatchMaskFormer(STPatchFormer):
         static_only: bool = False,
         dynamic_only: bool = False,
         mask_ratio: float = 0.4,
-        temperature: float = 50.0,
-        anormly_ratio: float = 0.1,
     ) -> None:
         super().__init__(seq_len, patch_len, stride, d_in, d_model, n_heads,
                          dist_mat, n_gcn, temporal_half, spatial_half,
                          static_only, dynamic_only)
         self.mask_ratio = mask_ratio
         self.random_mask = RandomMasking(self.mask_ratio)
-        self.temperature = temperature
-        self.anormly_ratio = anormly_ratio
 
     def forward(self, x):
         patch_x = self.patch(x)  # (N, NP, VAR, PL)
@@ -324,69 +284,7 @@ class STPatchMaskFormer(STPatchFormer):
             self.patch_len,  # (VAR, NP, N, PL)
         ).permute(2, 1, 3, 0)  # (N, NP, PL, VAR)
         z = self.revin(z, 'denorm')
-
-        # Calculate anomaly scores
-        adv_loss = 0.0
-        con_loss = 0.0
-        
-        # 计算KL散度损失
-        for i in range(attn.shape[0]):
-            if i == 0:
-                adv_loss = my_kl_loss(attn[i], 
-                    (graph[i] / torch.unsqueeze(torch.sum(graph[i], dim=-1), dim=-1)).detach()) * self.temperature
-                con_loss = my_kl_loss(
-                    (graph[i] / torch.unsqueeze(torch.sum(graph[i], dim=-1), dim=-1)),
-                    attn[i].detach()) * self.temperature
-            else:
-                adv_loss += my_kl_loss(attn[i], 
-                    (graph[i] / torch.unsqueeze(torch.sum(graph[i], dim=-1), dim=-1)).detach()) * self.temperature
-                con_loss += my_kl_loss(
-                    (graph[i] / torch.unsqueeze(torch.sum(graph[i], dim=-1), dim=-1)),
-                    attn[i].detach()) * self.temperature
-        
-        # 计算异常分数
-        metric = torch.softmax((adv_loss + con_loss), dim=-1)
-        anomaly_scores = metric.detach().cpu().numpy()
-        
-        # 计算阈值
-        thresh = np.percentile(anomaly_scores, 100 - self.anormly_ratio)
-        
-        # 检测异常
-        pred = (anomaly_scores > thresh).astype(int)
-        
-        # 获取异常区域和时间戳
-        anomaly_regions = []
-        anomaly_timestamps = []
-        
-        anomaly_state = False
-        for i in range(len(pred)):
-            if pred[i] == 1 and not anomaly_state:
-                anomaly_state = True
-                start_idx = i
-            elif pred[i] == 0 and anomaly_state:
-                anomaly_state = False
-                end_idx = i - 1
-                anomaly_regions.append((start_idx, end_idx))
-                # 转换索引为时间戳
-                start_time = start_idx * self.stride
-                end_time = end_idx * self.stride + self.patch_len
-                anomaly_timestamps.append((start_time, end_time))
-        
-        if anomaly_state:
-            end_idx = len(pred) - 1
-            anomaly_regions.append((start_idx, end_idx))
-            start_time = start_idx * self.stride
-            end_time = end_idx * self.stride + self.patch_len
-            anomaly_timestamps.append((start_time, end_time))
-
-        return {
-            'reconstruction': (patch_x.transpose(2, 3), z),
-            'attention': (attn, graph),
-            'anomaly_scores': anomaly_scores,
-            'anomaly_regions': anomaly_regions,
-            'anomaly_timestamps': anomaly_timestamps,
-            'threshold': thresh
-        }
+        return (patch_x.transpose(2, 3), z), (attn, graph)
 
 
 class STPatch_MGCNFormer(nn.Module):
@@ -405,8 +303,6 @@ class STPatch_MGCNFormer(nn.Module):
         spatial_half: bool = False,
         static_only: bool = False,
         dynamic_only: bool = False,
-        temperature: float = 50.0,
-        anormly_ratio: float = 0.1,
     ) -> None:
         super().__init__()
         self.seq_len = seq_len
@@ -420,8 +316,6 @@ class STPatch_MGCNFormer(nn.Module):
         self.n_gcn = n_gcn
         self.static_only = static_only
         self.dynamic_only = dynamic_only
-        self.temperature = temperature
-        self.anormly_ratio = anormly_ratio
 
         self.revin = RevIN(d_in)
         self.patch = Patch(seq_len, patch_len, stride)
@@ -452,6 +346,7 @@ class STPatch_MGCNFormer(nn.Module):
             d_model,
             dist_mats,
             n_layers=n_gcn,
+            bias=True,
         )
         self.proj_dy = nn.Sequential(
             nn.Dropout(0.1),
@@ -462,7 +357,7 @@ class STPatch_MGCNFormer(nn.Module):
             nn.Linear(d_model, patch_len),
         )
 
-    def forward(self, x, return_dict=False):
+    def forward(self, x, return_recon=True):
         # x : (N, T, d)
         patch_x = self.patch(x)  # (N, NP, VAR, PL)
         x = self.revin(patch_x.transpose(2, 3), 'norm').transpose(2, 3)
@@ -472,6 +367,8 @@ class STPatch_MGCNFormer(nn.Module):
 
         dy_z, attn = self.spatial_tsfm(z)  # (VAR * NP, N, D)
         st_z, graph = self.da_gcn(z)  # (VAR * NP, N, D)
+        if not return_recon:
+            return attn, graph
 
         if self.dynamic_only:
             z = self.proj_dy(dy_z)  # (VAR * NP, N, PL)
@@ -482,7 +379,6 @@ class STPatch_MGCNFormer(nn.Module):
             st_out = self.proj_st(st_z)  # (VAR * NP, N, PL)
             g = torch.sigmoid(dy_out + st_out)
             z = g * dy_out + (1 - g) * st_out
-
         z = z.reshape(
             self.d_in,
             -1,
@@ -490,89 +386,4 @@ class STPatch_MGCNFormer(nn.Module):
             self.patch_len,  # (VAR, NP, N, PL)
         ).permute(2, 1, 3, 0)  # (N, NP, PL, VAR)
         z = self.revin(z, 'denorm')
-
-        if return_dict:
-            # 计算KL散度损失
-            adv_loss = 0.0
-            con_loss = 0.0
-            
-            # 确保graph和attn的维度匹配
-            for i in range(min(len(attn), len(graph))):
-                if i == 0:
-                    adv_loss = kl_loss(attn[i], 
-                        (graph[i] / torch.unsqueeze(torch.sum(graph[i], dim=-1), dim=-1)).detach()) * self.temperature
-                    con_loss = kl_loss(
-                        (graph[i] / torch.unsqueeze(torch.sum(graph[i], dim=-1), dim=-1)),
-                        attn[i].detach()) * self.temperature
-                else:
-                    adv_loss += kl_loss(attn[i], 
-                        (graph[i] / torch.unsqueeze(torch.sum(graph[i], dim=-1), dim=-1)).detach()) * self.temperature
-                    con_loss += kl_loss(
-                        (graph[i] / torch.unsqueeze(torch.sum(graph[i], dim=-1), dim=-1)),
-                        attn[i].detach()) * self.temperature
-            
-            # 计算动态和静态异常分数
-            dy_scores = torch.mean(dy_out, dim=0)  # (N, T)
-            st_scores = torch.mean(st_out, dim=0)  # (N, T)
-            
-            # 计算区域异常分数（空间维度）- 对每个区域的所有时间点取平均
-            region_scores = torch.mean(st_scores, dim=1)  # (N,)
-            
-            # 计算时间异常分数（时间维度）- 对每个时间点的所有区域取平均
-            time_scores = torch.mean(dy_scores, dim=0)  # (T,)
-            
-            # 计算综合异常分数
-            anomaly_scores = (dy_scores + st_scores) / 2
-            
-            # 计算阈值（使用numpy进行百分位数计算）
-            region_thresh = torch.tensor(np.percentile(region_scores.detach().cpu().numpy(), 100 - self.anormly_ratio)).to(region_scores.device)
-            time_thresh = torch.tensor(np.percentile(time_scores.detach().cpu().numpy(), 100 - self.anormly_ratio)).to(time_scores.device)
-            
-            # 检测区域异常
-            region_pred = (region_scores > region_thresh).int()
-            
-            # 检测时间异常
-            time_pred = (time_scores > time_thresh).int()
-            
-            # 获取异常区域
-            anomaly_regions = torch.where(region_pred == 1)[0].cpu().numpy().tolist()
-            
-            # 获取异常时间戳
-            anomaly_timestamps = []
-            time_indices = torch.where(time_pred == 1)[0].cpu().numpy()
-            
-            if len(time_indices) > 0:
-                # 合并连续的异常时间戳
-                start_idx = time_indices[0]
-                prev_idx = start_idx
-                
-                for i in range(1, len(time_indices)):
-                    if time_indices[i] != prev_idx + 1:
-                        # 添加当前连续段
-                        start_time = start_idx * self.stride
-                        end_time = prev_idx * self.stride + self.patch_len
-                        anomaly_timestamps.append((start_time, end_time))
-                        # 开始新的连续段
-                        start_idx = time_indices[i]
-                    prev_idx = time_indices[i]
-                
-                # 添加最后一个连续段
-                start_time = start_idx * self.stride
-                end_time = prev_idx * self.stride + self.patch_len
-                anomaly_timestamps.append((start_time, end_time))
-
-            return {
-                'reconstruction': (patch_x.transpose(2, 3), z),
-                'attention': (attn, graph),
-                'anomaly_scores': anomaly_scores,
-                'region_scores': region_scores,  # 保持tensor格式
-                'time_scores': time_scores,      # 保持tensor格式
-                'region_pred': region_pred,
-                'time_pred': time_pred,
-                'anomaly_regions': anomaly_regions,
-                'anomaly_timestamps': anomaly_timestamps,
-                'region_threshold': region_thresh,
-                'time_threshold': time_thresh
-            }
-        else:
-            return (patch_x.transpose(2, 3), z), (attn, graph)
+        return (patch_x.transpose(2, 3), z), (attn, graph)

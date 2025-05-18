@@ -3,11 +3,23 @@ import numpy as np
 
 
 def precision_k(actual, predicted, k):
+    # 确保输入是numpy数组
+    if isinstance(actual, torch.Tensor):
+        actual = actual.cpu().numpy()
+    if isinstance(predicted, torch.Tensor):
+        predicted = predicted.cpu().numpy()
+    
     sort_index = np.argsort(predicted)
     return np.sum(actual[sort_index[-k:]]) / float(k)
 
 
 def recall_k(actual, predicted, k):
+    # 确保输入是numpy数组
+    if isinstance(actual, torch.Tensor):
+        actual = actual.cpu().numpy()
+    if isinstance(predicted, torch.Tensor):
+        predicted = predicted.cpu().numpy()
+    
     sort_index = np.argsort(predicted)
     return np.sum(actual[sort_index[-k:]]) / np.sum(actual)
 
@@ -17,6 +29,10 @@ def predict_by_score(
     contamination: float,
     return_threshold: bool = False,
 ):
+    # 确保输入是numpy数组
+    if isinstance(score, torch.Tensor):
+        score = score.cpu().numpy()
+    
     pred = np.zeros_like(score)
     threshold = np.percentile(score, contamination)
     pred[score > threshold] = 1

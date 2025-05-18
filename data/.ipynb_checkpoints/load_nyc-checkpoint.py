@@ -44,17 +44,13 @@ def load_dataset(args):
     # 转换时间戳
     df['pickup_datetime'] = pd.to_datetime(df['tpep_pickup_datetime'])
     
-    # 按10分钟聚合数据，并确保时间槽对齐
+    # 按10分钟聚合数据
     df['time_slot'] = df['pickup_datetime'].dt.floor('10min')
     df['day'] = df['pickup_datetime'].dt.date
     
     # 确保LocationID在有效范围内
     df = df[df['PULocationID'].isin(valid_zones) & df['DOLocationID'].isin(valid_zones)]
     print("过滤后数据形状:", df.shape)
-    
-    # 创建完整的时间槽索引
-    time_slots_per_day = 24 * 6  # 10分钟一个时间槽，每天144个时间槽
-    all_days = sorted(df['day'].unique())
     
     # 计算每个区域的流量
     flow_data = df.groupby(['day', 'time_slot', 'PULocationID']).size().unstack(fill_value=0)
@@ -74,41 +70,6 @@ def load_dataset(args):
     # 移除多余的区域
     flow_data = flow_data[sorted(valid_zones)]
     
-    # 重置索引，确保数据按天和时间槽排序
-    flow_data = flow_data.reset_index()
-    flow_data['day'] = pd.to_datetime(flow_data['day']).dt.date
-    flow_data = flow_data.sort_values(['day', 'time_slot'])
-    
-    # 确保每天都有完整的时间槽
-    complete_data = []
-    for day in all_days:
-        day_data = flow_data[flow_data['day'] == day].copy()
-        if len(day_data) < time_slots_per_day:
-            # 创建完整的时间槽
-            time_slots = pd.date_range(
-                start=pd.Timestamp(day),
-                end=pd.Timestamp(day) + pd.Timedelta(days=1) - pd.Timedelta(minutes=10),
-                freq='10min'
-            ).time
-            # 创建完整的数据框
-            complete_day = pd.DataFrame({
-                'day': [day] * time_slots_per_day,
-                'time_slot': time_slots
-            })
-            # 修正：类型统一
-            day_data['time_slot'] = pd.to_datetime(day_data['time_slot']).dt.time
-            # 合并现有数据
-            complete_day = complete_day.merge(
-                day_data,
-                on=['day', 'time_slot'],
-                how='left'
-            ).fillna(0)
-            complete_data.append(complete_day)
-        else:
-            complete_data.append(day_data)
-    
-    # 合并所有天的数据
-    flow_data = pd.concat(complete_data, ignore_index=True)
     print("处理后数据形状:", flow_data.shape)
     
     # 使用min-max归一化
@@ -119,16 +80,26 @@ def load_dataset(args):
         
     if normalize:
         scaler = MinMaxScaler()
-        flow_data.iloc[:, 2:] = scaler.fit_transform(flow_data.iloc[:, 2:])
+        flow_data = pd.DataFrame(
+            scaler.fit_transform(flow_data),
+            index=flow_data.index,
+            columns=flow_data.columns
+        )
     
     # 转换为numpy数组并重塑
-    flow_values = flow_data.iloc[:, 2:].values  # 只取数值列
-    print("转换为numpy数组后形状:", flow_values.shape)
+    flow_data = flow_data.values
+    print("转换为numpy数组后形状:", flow_data.shape)
     
-    # 重塑数据为 (days, time_slots_per_day, n_zones)
-    n_days = len(all_days)
-    flow_values = flow_values.reshape(n_days, time_slots_per_day, n_zones)
-    print("重塑后数据形状:", flow_values.shape)
+    # 确保数据点数量能被每天的时间槽数量整除
+    time_slots_per_day = 24 * 6  # 10分钟一个时间槽
+    num_days = len(flow_data) // time_slots_per_day
+    if len(flow_data) % time_slots_per_day != 0:
+        print(f"警告：数据点数量({len(flow_data)})不能被每天的时间槽数量({time_slots_per_day})整除")
+        print("将截断到最接近的整数天数")
+        flow_data = flow_data[:(num_days * time_slots_per_day)]
+    
+    flow_data = flow_data.reshape(num_days, time_slots_per_day, n_zones)
+    print("重塑后数据形状:", flow_data.shape)
     
     # 按时间顺序划分数据集
     if isinstance(args, dict):
@@ -140,54 +111,16 @@ def load_dataset(args):
     test_size = train_size   # 测试集大小与训练集相同
     
     # 确保有足够的数据
-    required_days = train_size + val_size + test_size
-    if n_days < required_days:
-        raise ValueError(f"数据天数不足，需要至少{required_days}天的数据，但只有{n_days}天")
-    
-    # 只使用前required_days天的数据
-    flow_values = flow_values[:required_days]
+    if num_days < (train_size + val_size + test_size):
+        raise ValueError(f"数据天数不足，需要至少{train_size + val_size + test_size}天的数据，但只有{num_days}天")
     
     # 按时间顺序划分
-    X = flow_values[:train_size]
-    val_X = flow_values[train_size:train_size + val_size]
-    test_X = flow_values[train_size + val_size:train_size + val_size + test_size]
+    X = flow_data[:train_size]
+    val_X = flow_data[train_size:train_size + val_size]
+    test_X = flow_data[train_size + val_size:train_size + val_size + test_size]
     
     # 生成标签（这里需要根据实际需求修改）
-    n_zones = adj.shape[0]  # 区域数量
-    n_time_slots = test_X.shape[1]  # 时间槽数量
-    y = np.zeros((n_zones, n_time_slots))  # 初始化所有区域和时间槽为正常
-    
-    # 根据anormly_ratio参数生成异常标签
-    if isinstance(args, dict):
-        anomaly_ratio = args.get('anormly_ratio', 0.1)
-    else:
-        anomaly_ratio = args.anormly_ratio
-        
-    # 计算需要标记为异常的总数量
-    total_cells = n_zones * n_time_slots
-    n_anomalies = int(total_cells * anomaly_ratio)
-    
-    # 随机选择要标记为异常的位置
-    anomaly_indices = np.random.choice(total_cells, n_anomalies, replace=False)
-    anomaly_zones = anomaly_indices // n_time_slots
-    anomaly_times = anomaly_indices % n_time_slots
-    
-    # 将选中的位置标记为异常
-    y[anomaly_zones, anomaly_times] = 1
-    
-    print(f"\n标签统计:")
-    print(f"总单元格数: {total_cells}")
-    print(f"正常单元格数: {np.sum(y == 0)}")
-    print(f"异常单元格数: {np.sum(y == 1)}")
-    print(f"异常比例: {np.mean(y == 1) * 100:.2f}%")
-    print(f"每个区域的异常时间槽数量: {np.sum(y, axis=1)}")
-    print(f"每个时间槽的异常区域数量: {np.sum(y, axis=0)}")
-    
-    # 将标签重塑为与输入数据相同的形状
-    y = y.reshape(n_zones, n_time_slots)  # 确保标签形状正确
-    y = y.T  # 转置为 (时间槽, 区域)
-    y = y.reshape(1, n_time_slots, n_zones)  # 添加天数维度
-    y = np.repeat(y, test_X.shape[0], axis=0)  # 复制到与test_X相同的天数
+    y = np.zeros(len(test_X))
     
     return X, val_X, test_X, (adj, dist, poi_sim), y
 

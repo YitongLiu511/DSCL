@@ -1,0 +1,2371 @@
+
+实验参数设置:
+数据集: NYC-Taxi
+训练/测试天数: 14天
+数据归一化: 启用
+POI归一化: 启用
+模型参数:
+- 隐藏状态维度: 128
+- 时间注意力头数: 16
+- 空间注意力头数: 8
+- GCN层数: 3
+- Patch大小: 12
+训练设置:
+- 学习率: 0.001
+- 训练轮数: 100
+- 独立运行次数: 1
+- 设备: GPU
+
+邻接矩阵中的区域数量: 263
+原始数据形状: (5980721, 20)
+区域查找表中的区域数量: 265
+有效区域ID范围: 1 到 263
+过滤后数据形状: (5869043, 23)
+初始聚合后数据形状: (8553, 258)
+缺失的区域: 5
+多余的区域: 0
+处理后数据形状: (9648, 265)
+转换为numpy数组后形状: (9648, 263)
+重塑后数据形状: (67, 144, 263)
+
+标签统计:
+总单元格数: 37872
+正常单元格数: 34085
+异常单元格数: 3787
+异常比例: 10.00%
+每个区域的异常时间槽数量: [12. 17. 12. 16. 14. 15. 14. 15. 15. 27. 13. 19. 18. 12. 14. 20. 13. 12.
+  9. 19. 12. 19. 13. 10. 11. 13. 19. 16. 16. 17. 17. 13. 12. 12. 16.  7.
+  9. 17. 16. 18. 15. 11. 10. 10. 12. 16. 15. 13. 14.  9. 16.  7. 17. 15.
+ 12. 14. 13. 22. 18. 15. 12. 13. 20. 11. 12. 12. 17. 18. 16. 13. 17.  6.
+ 14. 18. 14. 17. 21. 13. 11. 11. 16. 21. 11. 16. 21. 16. 16. 14. 11. 18.
+ 16. 12. 11. 14. 11. 13. 13. 15. 16. 14. 12. 16. 11. 11. 20. 13. 12. 20.
+ 13. 16. 14. 10. 18. 15. 14. 11. 16. 14. 21.  8. 16.  9. 14. 11. 17. 16.
+ 12. 14. 17. 22. 12. 15. 18. 13. 12. 13. 12. 16. 11. 16. 18. 16.  6.  7.
+ 17. 15. 12. 10. 16. 13. 13. 16. 12. 14. 19. 17. 17. 15. 23. 10. 19. 17.
+  8. 14. 14.  9. 13. 15. 10. 15. 18. 17.  7. 18.  9. 17. 10. 10. 22. 13.
+ 15. 13. 16. 13. 18. 21. 15. 16. 21. 17. 16. 14. 17. 16. 10. 17. 12.  7.
+ 12. 12. 17. 15. 14. 12. 13. 17. 19. 12. 10. 11. 13. 11. 22. 16. 18. 14.
+  7. 16. 10. 11. 13. 16. 14. 10. 16. 16. 14. 17. 14. 13. 10. 18. 15. 16.
+ 18. 17. 17. 11. 19. 16. 12. 17. 20. 15. 12. 13. 22. 16. 16. 14. 12. 12.
+ 13. 14. 19. 10. 12. 15. 17. 13. 13. 18. 10.]
+每个时间槽的异常区域数量: [27. 27. 25. 36. 23. 32. 18. 23. 25. 27. 31. 17. 29. 22. 23. 25. 19. 21.
+ 26. 25. 25. 28. 28. 31. 32. 30. 25. 21. 24. 30. 33. 25. 28. 24. 29. 23.
+ 21. 27. 34. 27. 25. 17. 31. 38. 21. 24. 21. 25. 19. 21. 30. 30. 22. 27.
+ 26. 25. 32. 22. 28. 13. 23. 27. 22. 30. 26. 18. 26. 26. 25. 26. 20. 17.
+ 27. 33. 28. 29. 30. 31. 23. 28. 27. 36. 30. 25. 29. 37. 20. 29. 23. 35.
+ 33. 29. 26. 21. 19. 30. 33. 29. 31. 25. 28. 30. 29. 19. 33. 34. 28. 30.
+ 21. 24. 34. 26. 31. 25. 25. 23. 29. 25. 28. 26. 40. 24. 32. 26. 23. 20.
+ 24. 30. 27. 28. 30. 15. 21. 23. 29. 23. 19. 25. 38. 21. 20. 31. 24. 21.]
+原始数据shape: (14, 144, 263)
+调整后数据shape: (263, 144, 14)
+
+标签统计:
+总单元格数: 530208
+正常单元格数: 477190
+异常单元格数: 53018
+异常比例: 10.00%
+
+调整后的标签分布:
+区域异常标签:
+- 异常区域数: 0 (预期: 26)
+- 异常区域比例: 0.00%
+时间异常标签:
+- 异常时间槽数: 15 (预期: 14)
+- 异常时间槽比例: 10.42%
+标签形状: (263, 144, 14, 2)
+总异常样本数: 109662
+总正常样本数: 950754
+总体异常比例: 10.34%
+
+异常分布详情:
+区域异常分布:
+- 异常区域数量: 0
+- 异常区域比例: 0.00%
+时间异常分布:
+- 异常时间槽数量: 15
+- 异常时间槽比例: 10.42%
+
+维度检查:
+输入数据X形状: (263, 144, 14)
+标签y_reshaped形状: (263, 144, 14, 2)
+验证集形状: (263, 144, 14)
+测试集形状: (263, 144, 14)
+1-th experiment:
+  0%|          | 0/100 [00:00<?, ?it/s]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  0%|          | 0/100 [00:00<?, ?it/s, auc=区域AUC: 0.576, 时间AUC: 0.909, 综合AUC: 0.838]  1%|          | 1/100 [00:00<01:13,  1.35it/s, auc=区域AUC: 0.576, 时间AUC: 0.909, 综合AUC: 0.838]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  1%|          | 1/100 [00:01<01:13,  1.35it/s, auc=区域AUC: 0.575, 时间AUC: 0.909, 综合AUC: 0.642]  2%|▏         | 2/100 [00:01<00:51,  1.91it/s, auc=区域AUC: 0.575, 时间AUC: 0.909, 综合AUC: 0.642]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  2%|▏         | 2/100 [00:01<00:51,  1.91it/s, auc=区域AUC: 0.574, 时间AUC: 0.636, 综合AUC: 0.580]  3%|▎         | 3/100 [00:01<00:44,  2.20it/s, auc=区域AUC: 0.574, 时间AUC: 0.636, 综合AUC: 0.580]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  3%|▎         | 3/100 [00:01<00:44,  2.20it/s, auc=区域AUC: 0.571, 时间AUC: 0.636, 综合AUC: 0.579]  4%|▍         | 4/100 [00:01<00:40,  2.34it/s, auc=区域AUC: 0.571, 时间AUC: 0.636, 综合AUC: 0.579]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  4%|▍         | 4/100 [00:02<00:40,  2.34it/s, auc=区域AUC: 0.569, 时间AUC: 0.636, 综合AUC: 0.578]  5%|▌         | 5/100 [00:02<00:38,  2.45it/s, auc=区域AUC: 0.569, 时间AUC: 0.636, 综合AUC: 0.578]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  5%|▌         | 5/100 [00:02<00:38,  2.45it/s, auc=区域AUC: 0.564, 时间AUC: 0.636, 综合AUC: 0.577]  6%|▌         | 6/100 [00:02<00:36,  2.54it/s, auc=区域AUC: 0.564, 时间AUC: 0.636, 综合AUC: 0.577]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  6%|▌         | 6/100 [00:02<00:36,  2.54it/s, auc=区域AUC: 0.562, 时间AUC: 0.545, 综合AUC: 0.556]  7%|▋         | 7/100 [00:02<00:36,  2.55it/s, auc=区域AUC: 0.562, 时间AUC: 0.545, 综合AUC: 0.556]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  7%|▋         | 7/100 [00:03<00:36,  2.55it/s, auc=区域AUC: 0.558, 时间AUC: 0.364, 综合AUC: 0.514]  8%|▊         | 8/100 [00:03<00:35,  2.61it/s, auc=区域AUC: 0.558, 时间AUC: 0.364, 综合AUC: 0.514]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  8%|▊         | 8/100 [00:03<00:35,  2.61it/s, auc=区域AUC: 0.543, 时间AUC: 0.364, 综合AUC: 0.509]  9%|▉         | 9/100 [00:03<00:34,  2.68it/s, auc=区域AUC: 0.543, 时间AUC: 0.364, 综合AUC: 0.509]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+  9%|▉         | 9/100 [00:04<00:34,  2.68it/s, auc=区域AUC: 0.404, 时间AUC: 0.364, 综合AUC: 0.472] 10%|█         | 10/100 [00:04<00:33,  2.71it/s, auc=区域AUC: 0.404, 时间AUC: 0.364, 综合AUC: 0.472]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0173, 0.0034]
+时间分数范围: [-0.5378, 0.1338]
+[DEBUG] 计算阈值:
+分数形状: torch.Size([263, 1])
+分数范围: [-0.0173, 0.0034]
+分数均值: -0.0057
+分数标准差: 0.0053
+计算得到的阈值: -0.0006
+[DEBUG] 计算阈值:
+分数形状: torch.Size([1, 12])
+分数范围: [-0.5378, 0.1338]
+分数均值: -0.2817
+分数标准差: 0.2015
+计算得到的阈值: -0.0282
+检测到的区域异常数量: 35
+检测到的时间异常数量: 2
+区域阈值: -0.0006
+时间阈值: -0.0282
+最终检测到的异常事件数量: 876
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.576, 时间AUC: 0.909, 综合AUC: 0.838
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0344, -0.0006]
+时间分数范围: [-0.7839, -0.3039]
+检测到的区域异常数量: 0
+检测到的时间异常数量: 0
+区域阈值: -0.0006
+时间阈值: -0.0282
+[WARNING] 区域异常数量过少 (0 < 2)，调整阈值
+[WARNING] 时间异常数量过少 (0 < 2)，调整阈值
+最终检测到的异常事件数量: 1266
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.575, 时间AUC: 0.909, 综合AUC: 0.642
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0428, -0.0027]
+时间分数范围: [-1.0101, -0.4317]
+检测到的区域异常数量: 28
+检测到的时间异常数量: 0
+区域阈值: -0.0086
+时间阈值: -0.3955
+[WARNING] 时间异常数量过少 (0 < 2)，调整阈值
+最终检测到的异常事件数量: 1041
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.574, 时间AUC: 0.636, 综合AUC: 0.580
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0394, -0.0022]
+时间分数范围: [-1.2047, -0.4832]
+检测到的区域异常数量: 33
+检测到的时间异常数量: 2
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 856
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.571, 时间AUC: 0.636, 综合AUC: 0.579
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0298, -0.0002]
+时间分数范围: [-1.3467, -0.5317]
+检测到的区域异常数量: 91
+检测到的时间异常数量: 2
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 1436
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.569, 时间AUC: 0.636, 综合AUC: 0.578
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0185, 0.0023]
+时间分数范围: [-1.4500, -0.4570]
+检测到的区域异常数量: 165
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2274
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.564, 时间AUC: 0.636, 综合AUC: 0.577
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0081, 0.0048]
+时间分数范围: [-1.5201, -0.2828]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.562, 时间AUC: 0.545, 综合AUC: 0.556
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0005, 0.0069]
+时间分数范围: [-1.5608, -0.1364]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.558, 时间AUC: 0.364, 综合AUC: 0.514
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0066, 0.0087]
+时间分数范围: [-1.6070, -0.0836]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.543, 时间AUC: 0.364, 综合AUC: 0.509
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0101, 0.0121]
+时间分数范围: [-1.7017, -0.1208]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.404, 时间AUC: 0.364, 综合AUC: 0.472
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0114, 0.0158]
+时间分数范围: [-1.7797, -0.2021]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+ 10%|█         | 10/100 [00:04<00:33,  2.71it/s, auc=区域AUC: 0.406, 时间AUC: 0.364, 综合AUC: 0.472] 11%|█         | 11/100 [00:04<00:32,  2.71it/s, auc=区域AUC: 0.406, 时间AUC: 0.364, 综合AUC: 0.472]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 11%|█         | 11/100 [00:04<00:32,  2.71it/s, auc=区域AUC: 0.407, 时间AUC: 0.364, 综合AUC: 0.472] 12%|█▏        | 12/100 [00:04<00:32,  2.74it/s, auc=区域AUC: 0.407, 时间AUC: 0.364, 综合AUC: 0.472]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 12%|█▏        | 12/100 [00:05<00:32,  2.74it/s, auc=区域AUC: 0.411, 时间AUC: 0.364, 综合AUC: 0.473] 13%|█▎        | 13/100 [00:05<00:31,  2.74it/s, auc=区域AUC: 0.411, 时间AUC: 0.364, 综合AUC: 0.473]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 13%|█▎        | 13/100 [00:05<00:31,  2.74it/s, auc=区域AUC: 0.412, 时间AUC: 0.364, 综合AUC: 0.474] 14%|█▍        | 14/100 [00:05<00:31,  2.75it/s, auc=区域AUC: 0.412, 时间AUC: 0.364, 综合AUC: 0.474]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 14%|█▍        | 14/100 [00:05<00:31,  2.75it/s, auc=区域AUC: 0.414, 时间AUC: 0.364, 综合AUC: 0.474] 15%|█▌        | 15/100 [00:05<00:30,  2.77it/s, auc=区域AUC: 0.414, 时间AUC: 0.364, 综合AUC: 0.474]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 15%|█▌        | 15/100 [00:06<00:30,  2.77it/s, auc=区域AUC: 0.413, 时间AUC: 0.364, 综合AUC: 0.474] 16%|█▌        | 16/100 [00:06<00:30,  2.79it/s, auc=区域AUC: 0.413, 时间AUC: 0.364, 综合AUC: 0.474]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 16%|█▌        | 16/100 [00:06<00:30,  2.79it/s, auc=区域AUC: 0.413, 时间AUC: 0.455, 综合AUC: 0.495] 17%|█▋        | 17/100 [00:06<00:29,  2.78it/s, auc=区域AUC: 0.413, 时间AUC: 0.455, 综合AUC: 0.495]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 17%|█▋        | 17/100 [00:06<00:29,  2.78it/s, auc=区域AUC: 0.411, 时间AUC: 0.455, 综合AUC: 0.494] 18%|█▊        | 18/100 [00:06<00:29,  2.76it/s, auc=区域AUC: 0.411, 时间AUC: 0.455, 综合AUC: 0.494]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 18%|█▊        | 18/100 [00:07<00:29,  2.76it/s, auc=区域AUC: 0.411, 时间AUC: 0.545, 综合AUC: 0.515] 19%|█▉        | 19/100 [00:07<00:29,  2.75it/s, auc=区域AUC: 0.411, 时间AUC: 0.545, 综合AUC: 0.515]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 19%|█▉        | 19/100 [00:07<00:29,  2.75it/s, auc=区域AUC: 0.412, 时间AUC: 0.636, 综合AUC: 0.535] 20%|██        | 20/100 [00:07<00:29,  2.76it/s, auc=区域AUC: 0.412, 时间AUC: 0.636, 综合AUC: 0.535]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 20%|██        | 20/100 [00:08<00:29,  2.76it/s, auc=区域AUC: 0.410, 时间AUC: 0.636, 综合AUC: 0.535] 21%|██        | 21/100 [00:08<00:28,  2.75it/s, auc=区域AUC: 0.410, 时间AUC: 0.636, 综合AUC: 0.535]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.406, 时间AUC: 0.364, 综合AUC: 0.472
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0128, 0.0198]
+时间分数范围: [-1.8400, -0.2840]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.407, 时间AUC: 0.364, 综合AUC: 0.472
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0142, 0.0245]
+时间分数范围: [-1.8810, -0.3045]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.411, 时间AUC: 0.364, 综合AUC: 0.473
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0158, 0.0299]
+时间分数范围: [-1.9029, -0.2947]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.412, 时间AUC: 0.364, 综合AUC: 0.474
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0175, 0.0361]
+时间分数范围: [-1.9060, -0.2858]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.414, 时间AUC: 0.364, 综合AUC: 0.474
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0193, 0.0430]
+时间分数范围: [-1.8882, -0.2931]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.413, 时间AUC: 0.364, 综合AUC: 0.474
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0212, 0.0502]
+时间分数范围: [-1.8532, -0.2875]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.413, 时间AUC: 0.455, 综合AUC: 0.495
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0230, 0.0572]
+时间分数范围: [-1.8067, -0.2883]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.411, 时间AUC: 0.455, 综合AUC: 0.494
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0246, 0.0632]
+时间分数范围: [-1.7532, -0.3118]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.411, 时间AUC: 0.545, 综合AUC: 0.515
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0258, 0.0676]
+时间分数范围: [-1.7011, -0.3530]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.412, 时间AUC: 0.636, 综合AUC: 0.535
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0266, 0.0704]
+时间分数范围: [-1.6552, -0.4055]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.410, 时间AUC: 0.636, 综合AUC: 0.535
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0273, 0.0735]
+时间分数范围: [-1.6198, -0.4554]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+ 21%|██        | 21/100 [00:08<00:28,  2.75it/s, auc=区域AUC: 0.407, 时间AUC: 0.545, 综合AUC: 0.514] 22%|██▏       | 22/100 [00:08<00:28,  2.74it/s, auc=区域AUC: 0.407, 时间AUC: 0.545, 综合AUC: 0.514]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 22%|██▏       | 22/100 [00:08<00:28,  2.74it/s, auc=区域AUC: 0.406, 时间AUC: 0.455, 综合AUC: 0.493] 23%|██▎       | 23/100 [00:08<00:28,  2.73it/s, auc=区域AUC: 0.406, 时间AUC: 0.455, 综合AUC: 0.493]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 23%|██▎       | 23/100 [00:09<00:28,  2.73it/s, auc=区域AUC: 0.406, 时间AUC: 0.455, 综合AUC: 0.493] 24%|██▍       | 24/100 [00:09<00:27,  2.73it/s, auc=区域AUC: 0.406, 时间AUC: 0.455, 综合AUC: 0.493]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 24%|██▍       | 24/100 [00:09<00:27,  2.73it/s, auc=区域AUC: 0.406, 时间AUC: 0.455, 综合AUC: 0.493] 25%|██▌       | 25/100 [00:09<00:27,  2.73it/s, auc=区域AUC: 0.406, 时间AUC: 0.455, 综合AUC: 0.493]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 25%|██▌       | 25/100 [00:09<00:27,  2.73it/s, auc=区域AUC: 0.406, 时间AUC: 0.273, 综合AUC: 0.451] 26%|██▌       | 26/100 [00:09<00:26,  2.74it/s, auc=区域AUC: 0.406, 时间AUC: 0.273, 综合AUC: 0.451]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 26%|██▌       | 26/100 [00:10<00:26,  2.74it/s, auc=区域AUC: 0.406, 时间AUC: 0.273, 综合AUC: 0.452] 27%|██▋       | 27/100 [00:10<00:26,  2.76it/s, auc=区域AUC: 0.406, 时间AUC: 0.273, 综合AUC: 0.452]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 27%|██▋       | 27/100 [00:10<00:26,  2.76it/s, auc=区域AUC: 0.407, 时间AUC: 0.182, 综合AUC: 0.431] 28%|██▊       | 28/100 [00:10<00:26,  2.75it/s, auc=区域AUC: 0.407, 时间AUC: 0.182, 综合AUC: 0.431]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 28%|██▊       | 28/100 [00:10<00:26,  2.75it/s, auc=区域AUC: 0.406, 时间AUC: 0.182, 综合AUC: 0.431] 29%|██▉       | 29/100 [00:10<00:25,  2.75it/s, auc=区域AUC: 0.406, 时间AUC: 0.182, 综合AUC: 0.431]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 29%|██▉       | 29/100 [00:11<00:25,  2.75it/s, auc=区域AUC: 0.410, 时间AUC: 0.182, 综合AUC: 0.432] 30%|███       | 30/100 [00:11<00:25,  2.74it/s, auc=区域AUC: 0.410, 时间AUC: 0.182, 综合AUC: 0.432]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 30%|███       | 30/100 [00:11<00:25,  2.74it/s, auc=区域AUC: 0.417, 时间AUC: 0.182, 综合AUC: 0.434] 31%|███       | 31/100 [00:11<00:25,  2.73it/s, auc=区域AUC: 0.417, 时间AUC: 0.182, 综合AUC: 0.434]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 31%|███       | 31/100 [00:12<00:25,  2.73it/s, auc=区域AUC: 0.420, 时间AUC: 0.182, 综合AUC: 0.435] 32%|███▏      | 32/100 [00:12<00:24,  2.75it/s, auc=区域AUC: 0.420, 时间AUC: 0.182, 综合AUC: 0.435]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 32%|███▏      | 32/100 [00:12<00:24,  2.75it/s, auc=区域AUC: 0.426, 时间AUC: 0.091, 综合AUC: 0.416] 33%|███▎      | 33/100 [00:12<00:24,  2.76it/s, auc=区域AUC: 0.426, 时间AUC: 0.091, 综合AUC: 0.416]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+区域AUC: 0.407, 时间AUC: 0.545, 综合AUC: 0.514
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0280, 0.0784]
+时间分数范围: [-1.5964, -0.4668]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.406, 时间AUC: 0.455, 综合AUC: 0.493
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0291, 0.0857]
+时间分数范围: [-1.5823, -0.4258]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.406, 时间AUC: 0.455, 综合AUC: 0.493
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0308, 0.0970]
+时间分数范围: [-1.5733, -0.3734]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.406, 时间AUC: 0.455, 综合AUC: 0.493
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0336, 0.1136]
+时间分数范围: [-1.5655, -0.3241]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.406, 时间AUC: 0.273, 综合AUC: 0.451
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0368, 0.1339]
+时间分数范围: [-1.5548, -0.2928]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.406, 时间AUC: 0.273, 综合AUC: 0.452
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0400, 0.1562]
+时间分数范围: [-1.5379, -0.2939]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.407, 时间AUC: 0.182, 综合AUC: 0.431
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0434, 0.1816]
+时间分数范围: [-1.5166, -0.3190]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.406, 时间AUC: 0.182, 综合AUC: 0.431
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0489, 0.2179]
+时间分数范围: [-1.4948, -0.3480]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.410, 时间AUC: 0.182, 综合AUC: 0.432
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0575, 0.2688]
+时间分数范围: [-1.4731, -0.3666]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.417, 时间AUC: 0.182, 综合AUC: 0.434
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0629, 0.3100]
+时间分数范围: [-1.4500, -0.3833]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.420, 时间AUC: 0.182, 综合AUC: 0.435
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0631, 0.3343]
+时间分数范围: [-1.4241, -0.3932]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.426, 时间AUC: 0.091, 综合AUC: 0.416
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0739, 0.3970]
+时间分数范围: [-1.4045, -0.3744]
+检测到的区域异常数量: 263 33%|███▎      | 33/100 [00:12<00:24,  2.76it/s, auc=区域AUC: 0.430, 时间AUC: 0.091, 综合AUC: 0.417] 34%|███▍      | 34/100 [00:12<00:24,  2.74it/s, auc=区域AUC: 0.430, 时间AUC: 0.091, 综合AUC: 0.417]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 34%|███▍      | 34/100 [00:13<00:24,  2.74it/s, auc=区域AUC: 0.445, 时间AUC: 0.091, 综合AUC: 0.421] 35%|███▌      | 35/100 [00:13<00:23,  2.75it/s, auc=区域AUC: 0.445, 时间AUC: 0.091, 综合AUC: 0.421]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 35%|███▌      | 35/100 [00:13<00:23,  2.75it/s, auc=区域AUC: 0.451, 时间AUC: 0.091, 综合AUC: 0.423] 36%|███▌      | 36/100 [00:13<00:23,  2.74it/s, auc=区域AUC: 0.451, 时间AUC: 0.091, 综合AUC: 0.423]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 36%|███▌      | 36/100 [00:13<00:23,  2.74it/s, auc=区域AUC: 0.460, 时间AUC: 0.091, 综合AUC: 0.425] 37%|███▋      | 37/100 [00:13<00:22,  2.75it/s, auc=区域AUC: 0.460, 时间AUC: 0.091, 综合AUC: 0.425]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 37%|███▋      | 37/100 [00:14<00:22,  2.75it/s, auc=区域AUC: 0.459, 时间AUC: 0.182, 综合AUC: 0.445] 38%|███▊      | 38/100 [00:14<00:22,  2.75it/s, auc=区域AUC: 0.459, 时间AUC: 0.182, 综合AUC: 0.445]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 38%|███▊      | 38/100 [00:14<00:22,  2.75it/s, auc=区域AUC: 0.445, 时间AUC: 0.182, 综合AUC: 0.441] 39%|███▉      | 39/100 [00:14<00:22,  2.76it/s, auc=区域AUC: 0.445, 时间AUC: 0.182, 综合AUC: 0.441]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 39%|███▉      | 39/100 [00:14<00:22,  2.76it/s, auc=区域AUC: 0.461, 时间AUC: 0.273, 综合AUC: 0.467] 40%|████      | 40/100 [00:14<00:21,  2.77it/s, auc=区域AUC: 0.461, 时间AUC: 0.273, 综合AUC: 0.467]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 40%|████      | 40/100 [00:15<00:21,  2.77it/s, auc=区域AUC: 0.462, 时间AUC: 0.273, 综合AUC: 0.467] 41%|████      | 41/100 [00:15<00:21,  2.78it/s, auc=区域AUC: 0.462, 时间AUC: 0.273, 综合AUC: 0.467]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 41%|████      | 41/100 [00:15<00:21,  2.78it/s, auc=区域AUC: 0.441, 时间AUC: 0.364, 综合AUC: 0.482] 42%|████▏     | 42/100 [00:15<00:20,  2.79it/s, auc=区域AUC: 0.441, 时间AUC: 0.364, 综合AUC: 0.482]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 42%|████▏     | 42/100 [00:16<00:20,  2.79it/s, auc=区域AUC: 0.460, 时间AUC: 0.364, 综合AUC: 0.487] 43%|████▎     | 43/100 [00:16<00:20,  2.80it/s, auc=区域AUC: 0.460, 时间AUC: 0.364, 综合AUC: 0.487]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 43%|████▎     | 43/100 [00:16<00:20,  2.80it/s, auc=区域AUC: 0.461, 时间AUC: 0.455, 综合AUC: 0.508] 44%|████▍     | 44/100 [00:16<00:20,  2.80it/s, auc=区域AUC: 0.461, 时间AUC: 0.455, 综合AUC: 0.508]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.430, 时间AUC: 0.091, 综合AUC: 0.417
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0694, 0.4028]
+时间分数范围: [-1.3794, -0.3785]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.445, 时间AUC: 0.091, 综合AUC: 0.421
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0776, 0.4480]
+时间分数范围: [-1.3538, -0.3729]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.451, 时间AUC: 0.091, 综合AUC: 0.423
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0269, 0.4044]
+时间分数范围: [-1.3209, -0.4032]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.460, 时间AUC: 0.091, 综合AUC: 0.425
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0837, 0.4815]
+时间分数范围: [-1.2880, -0.3814]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.459, 时间AUC: 0.182, 综合AUC: 0.445
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0528, 0.3653]
+时间分数范围: [-1.2424, -0.4416]
+检测到的区域异常数量: 247
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3012
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.445, 时间AUC: 0.182, 综合AUC: 0.441
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.0023, 0.4141]
+时间分数范围: [-1.2037, -0.4013]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.461, 时间AUC: 0.273, 综合AUC: 0.467
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0248, 0.3982]
+时间分数范围: [-1.1597, -0.3919]
+检测到的区域异常数量: 257
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3114
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.462, 时间AUC: 0.273, 综合AUC: 0.467
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1189, 0.3349]
+时间分数范围: [-1.1180, -0.4090]
+检测到的区域异常数量: 234
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2982
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.441, 时间AUC: 0.364, 综合AUC: 0.482
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0536, 0.3904]
+时间分数范围: [-1.0820, -0.3724]
+检测到的区域异常数量: 250
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3078
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.460, 时间AUC: 0.364, 综合AUC: 0.487
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0874, 0.3724]
+时间分数范围: [-1.0556, -0.3788]
+检测到的区域异常数量: 243
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3036
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.461, 时间AUC: 0.455, 综合AUC: 0.508
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1484, 0.3356]
+时间分数范围: [-1.0454, -0.3979]
+检测到的区域异常数量: 235
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2988
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+ 44%|████▍     | 44/100 [00:16<00:20,  2.80it/s, auc=区域AUC: 0.444, 时间AUC: 0.455, 综合AUC: 0.503] 45%|████▌     | 45/100 [00:16<00:19,  2.77it/s, auc=区域AUC: 0.444, 时间AUC: 0.455, 综合AUC: 0.503]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 45%|████▌     | 45/100 [00:17<00:19,  2.77it/s, auc=区域AUC: 0.464, 时间AUC: 0.455, 综合AUC: 0.508] 46%|████▌     | 46/100 [00:17<00:19,  2.78it/s, auc=区域AUC: 0.464, 时间AUC: 0.455, 综合AUC: 0.508]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 46%|████▌     | 46/100 [00:17<00:19,  2.78it/s, auc=区域AUC: 0.465, 时间AUC: 0.455, 综合AUC: 0.509] 47%|████▋     | 47/100 [00:17<00:19,  2.77it/s, auc=区域AUC: 0.465, 时间AUC: 0.455, 综合AUC: 0.509]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 47%|████▋     | 47/100 [00:17<00:19,  2.77it/s, auc=区域AUC: 0.457, 时间AUC: 0.455, 综合AUC: 0.507] 48%|████▊     | 48/100 [00:17<00:19,  2.73it/s, auc=区域AUC: 0.457, 时间AUC: 0.455, 综合AUC: 0.507]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 48%|████▊     | 48/100 [00:18<00:19,  2.73it/s, auc=区域AUC: 0.467, 时间AUC: 0.455, 综合AUC: 0.509] 49%|████▉     | 49/100 [00:18<00:18,  2.74it/s, auc=区域AUC: 0.467, 时间AUC: 0.455, 综合AUC: 0.509]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 49%|████▉     | 49/100 [00:18<00:18,  2.74it/s, auc=区域AUC: 0.467, 时间AUC: 0.455, 综合AUC: 0.509] 50%|█████     | 50/100 [00:18<00:18,  2.73it/s, auc=区域AUC: 0.467, 时间AUC: 0.455, 综合AUC: 0.509]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 50%|█████     | 50/100 [00:18<00:18,  2.73it/s, auc=区域AUC: 0.463, 时间AUC: 0.455, 综合AUC: 0.508] 51%|█████     | 51/100 [00:18<00:17,  2.74it/s, auc=区域AUC: 0.463, 时间AUC: 0.455, 综合AUC: 0.508]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 51%|█████     | 51/100 [00:19<00:17,  2.74it/s, auc=区域AUC: 0.470, 时间AUC: 0.455, 综合AUC: 0.510] 52%|█████▏    | 52/100 [00:19<00:17,  2.75it/s, auc=区域AUC: 0.470, 时间AUC: 0.455, 综合AUC: 0.510]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 52%|█████▏    | 52/100 [00:19<00:17,  2.75it/s, auc=区域AUC: 0.471, 时间AUC: 0.455, 综合AUC: 0.510] 53%|█████▎    | 53/100 [00:19<00:17,  2.73it/s, auc=区域AUC: 0.471, 时间AUC: 0.455, 综合AUC: 0.510]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 53%|█████▎    | 53/100 [00:20<00:17,  2.73it/s, auc=区域AUC: 0.470, 时间AUC: 0.455, 综合AUC: 0.510] 54%|█████▍    | 54/100 [00:20<00:16,  2.74it/s, auc=区域AUC: 0.470, 时间AUC: 0.455, 综合AUC: 0.510]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 54%|█████▍    | 54/100 [00:20<00:16,  2.74it/s, auc=区域AUC: 0.472, 时间AUC: 0.364, 综合AUC: 0.490] 55%|█████▌    | 55/100 [00:20<00:16,  2.73it/s, auc=区域AUC: 0.472, 时间AUC: 0.364, 综合AUC: 0.490]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.444, 时间AUC: 0.455, 综合AUC: 0.503
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0984, 0.3703]
+时间分数范围: [-1.0464, -0.3779]
+检测到的区域异常数量: 243
+检测到的时间异常数量: 7
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3056
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.464, 时间AUC: 0.455, 综合AUC: 0.508
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1137, 0.3623]
+时间分数范围: [-1.0629, -0.3903]
+检测到的区域异常数量: 242
+检测到的时间异常数量: 7
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3051
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.465, 时间AUC: 0.455, 综合AUC: 0.509
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1555, 0.3394]
+时间分数范围: [-1.0898, -0.4192]
+检测到的区域异常数量: 237
+检测到的时间异常数量: 7
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3026
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.457, 时间AUC: 0.455, 综合AUC: 0.507
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1209, 0.3634]
+时间分数范围: [-1.1139, -0.4170]
+检测到的区域异常数量: 243
+检测到的时间异常数量: 7
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3056
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.467, 时间AUC: 0.455, 综合AUC: 0.509
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1271, 0.3624]
+时间分数范围: [-1.1345, -0.4129]
+检测到的区域异常数量: 243
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3036
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.467, 时间AUC: 0.455, 综合AUC: 0.509
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1615, 0.3448]
+时间分数范围: [-1.1503, -0.4185]
+检测到的区域异常数量: 237
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3000
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.463, 时间AUC: 0.455, 综合AUC: 0.508
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1356, 0.3606]
+时间分数范围: [-1.1561, -0.3866]
+检测到的区域异常数量: 242
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3030
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.470, 时间AUC: 0.455, 综合AUC: 0.510
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1332, 0.3617]
+时间分数范围: [-1.1518, -0.3723]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3042
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.471, 时间AUC: 0.455, 综合AUC: 0.510
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1550, 0.3501]
+时间分数范围: [-1.1395, -0.3783]
+检测到的区域异常数量: 241
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3024
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.470, 时间AUC: 0.455, 综合AUC: 0.510
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1345, 0.3596]
+时间分数范围: [-1.1154, -0.3709]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3042
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.472, 时间AUC: 0.364, 综合AUC: 0.490
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1305, 0.3609]
+时间分数范围: [-1.0860, -0.3778]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3042
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+ 55%|█████▌    | 55/100 [00:20<00:16,  2.73it/s, auc=区域AUC: 0.474, 时间AUC: 0.364, 综合AUC: 0.491] 56%|█████▌    | 56/100 [00:20<00:16,  2.75it/s, auc=区域AUC: 0.474, 时间AUC: 0.364, 综合AUC: 0.491]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 56%|█████▌    | 56/100 [00:21<00:16,  2.75it/s, auc=区域AUC: 0.472, 时间AUC: 0.364, 综合AUC: 0.490] 57%|█████▋    | 57/100 [00:21<00:15,  2.76it/s, auc=区域AUC: 0.472, 时间AUC: 0.364, 综合AUC: 0.490]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 57%|█████▋    | 57/100 [00:21<00:15,  2.76it/s, auc=区域AUC: 0.476, 时间AUC: 0.273, 综合AUC: 0.471] 58%|█████▊    | 58/100 [00:21<00:15,  2.76it/s, auc=区域AUC: 0.476, 时间AUC: 0.273, 综合AUC: 0.471]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 58%|█████▊    | 58/100 [00:21<00:15,  2.76it/s, auc=区域AUC: 0.476, 时间AUC: 0.273, 综合AUC: 0.471] 59%|█████▉    | 59/100 [00:21<00:14,  2.75it/s, auc=区域AUC: 0.476, 时间AUC: 0.273, 综合AUC: 0.471]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 59%|█████▉    | 59/100 [00:22<00:14,  2.75it/s, auc=区域AUC: 0.476, 时间AUC: 0.273, 综合AUC: 0.471] 60%|██████    | 60/100 [00:22<00:14,  2.76it/s, auc=区域AUC: 0.476, 时间AUC: 0.273, 综合AUC: 0.471]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 60%|██████    | 60/100 [00:22<00:14,  2.76it/s, auc=区域AUC: 0.478, 时间AUC: 0.273, 综合AUC: 0.471] 61%|██████    | 61/100 [00:22<00:14,  2.77it/s, auc=区域AUC: 0.478, 时间AUC: 0.273, 综合AUC: 0.471]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 61%|██████    | 61/100 [00:22<00:14,  2.77it/s, auc=区域AUC: 0.478, 时间AUC: 0.273, 综合AUC: 0.471] 62%|██████▏   | 62/100 [00:22<00:13,  2.78it/s, auc=区域AUC: 0.478, 时间AUC: 0.273, 综合AUC: 0.471]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 62%|██████▏   | 62/100 [00:23<00:13,  2.78it/s, auc=区域AUC: 0.480, 时间AUC: 0.364, 综合AUC: 0.492] 63%|██████▎   | 63/100 [00:23<00:13,  2.78it/s, auc=区域AUC: 0.480, 时间AUC: 0.364, 综合AUC: 0.492]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 63%|██████▎   | 63/100 [00:23<00:13,  2.78it/s, auc=区域AUC: 0.480, 时间AUC: 0.364, 综合AUC: 0.492] 64%|██████▍   | 64/100 [00:23<00:13,  2.77it/s, auc=区域AUC: 0.480, 时间AUC: 0.364, 综合AUC: 0.492]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 64%|██████▍   | 64/100 [00:24<00:13,  2.77it/s, auc=区域AUC: 0.480, 时间AUC: 0.364, 综合AUC: 0.492] 65%|██████▌   | 65/100 [00:24<00:12,  2.74it/s, auc=区域AUC: 0.480, 时间AUC: 0.364, 综合AUC: 0.492]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 65%|██████▌   | 65/100 [00:24<00:12,  2.74it/s, auc=区域AUC: 0.480, 时间AUC: 0.273, 综合AUC: 0.472] 66%|██████▌   | 66/100 [00:24<00:12,  2.73it/s, auc=区域AUC: 0.480, 时间AUC: 0.273, 综合AUC: 0.472]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 66%|██████▌   | 66/100 [00:24<00:12,  2.73it/s, auc=区域AUC: 0.482, 时间AUC: 0.273, 综合AUC: 0.472] 67%|██████▋   | 67/100 [00:24<00:12,  2.74it/s, auc=区域AUC: 0.482, 时间AUC: 0.273, 综合AUC: 0.472]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+区域AUC: 0.474, 时间AUC: 0.364, 综合AUC: 0.491
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1486, 0.3516]
+时间分数范围: [-1.0543, -0.3978]
+检测到的区域异常数量: 241
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3024
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.472, 时间AUC: 0.364, 综合AUC: 0.490
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1269, 0.3622]
+时间分数范围: [-1.0149, -0.3948]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3042
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.476, 时间AUC: 0.273, 综合AUC: 0.471
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1214, 0.3660]
+时间分数范围: [-0.9768, -0.3931]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3042
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.476, 时间AUC: 0.273, 综合AUC: 0.471
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1368, 0.3610]
+时间分数范围: [-0.9448, -0.3949]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3042
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.476, 时间AUC: 0.273, 综合AUC: 0.471
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1210, 0.3731]
+时间分数范围: [-0.9203, -0.3790]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3042
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.478, 时间AUC: 0.273, 综合AUC: 0.471
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1171, 0.3814]
+时间分数范围: [-0.9049, -0.3710]
+检测到的区域异常数量: 245
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3048
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.478, 时间AUC: 0.273, 综合AUC: 0.471
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1253, 0.3855]
+时间分数范围: [-0.8990, -0.3805]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3042
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.480, 时间AUC: 0.364, 综合AUC: 0.492
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1139, 0.4016]
+时间分数范围: [-0.8908, -0.3867]
+检测到的区域异常数量: 245
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3048
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.480, 时间AUC: 0.364, 综合AUC: 0.492
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1056, 0.4178]
+时间分数范围: [-0.8916, -0.3977]
+检测到的区域异常数量: 246
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3054
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.480, 时间AUC: 0.364, 综合AUC: 0.492
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1217, 0.4219]
+时间分数范围: [-0.8935, -0.4154]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3023
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.480, 时间AUC: 0.273, 综合AUC: 0.472
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0916, 0.4501]
+时间分数范围: [-0.8898, -0.4136]
+检测到的区域异常数量: 248
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3051
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.482, 时间AUC: 0.273, 综合AUC: 0.472
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1212, 0.4426]
+时间分数范围: [-0.8732, -0.4369]
+ 67%|██████▋   | 67/100 [00:25<00:12,  2.74it/s, auc=区域AUC: 0.481, 时间AUC: 0.182, 综合AUC: 0.451] 68%|██████▊   | 68/100 [00:25<00:11,  2.75it/s, auc=区域AUC: 0.481, 时间AUC: 0.182, 综合AUC: 0.451]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 68%|██████▊   | 68/100 [00:25<00:11,  2.75it/s, auc=区域AUC: 0.481, 时间AUC: 0.273, 综合AUC: 0.472] 69%|██████▉   | 69/100 [00:25<00:11,  2.75it/s, auc=区域AUC: 0.481, 时间AUC: 0.273, 综合AUC: 0.472]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 69%|██████▉   | 69/100 [00:25<00:11,  2.75it/s, auc=区域AUC: 0.481, 时间AUC: 0.273, 综合AUC: 0.472] 70%|███████   | 70/100 [00:25<00:10,  2.75it/s, auc=区域AUC: 0.481, 时间AUC: 0.273, 综合AUC: 0.472]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 70%|███████   | 70/100 [00:26<00:10,  2.75it/s, auc=区域AUC: 0.479, 时间AUC: 0.273, 综合AUC: 0.471] 71%|███████   | 71/100 [00:26<00:10,  2.76it/s, auc=区域AUC: 0.479, 时间AUC: 0.273, 综合AUC: 0.471]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 71%|███████   | 71/100 [00:26<00:10,  2.76it/s, auc=区域AUC: 0.484, 时间AUC: 0.273, 综合AUC: 0.473] 72%|███████▏  | 72/100 [00:26<00:10,  2.73it/s, auc=区域AUC: 0.484, 时间AUC: 0.273, 综合AUC: 0.473]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 72%|███████▏  | 72/100 [00:26<00:10,  2.73it/s, auc=区域AUC: 0.478, 时间AUC: 0.273, 综合AUC: 0.471] 73%|███████▎  | 73/100 [00:26<00:09,  2.75it/s, auc=区域AUC: 0.478, 时间AUC: 0.273, 综合AUC: 0.471]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 73%|███████▎  | 73/100 [00:27<00:09,  2.75it/s, auc=区域AUC: 0.482, 时间AUC: 0.273, 综合AUC: 0.472] 74%|███████▍  | 74/100 [00:27<00:09,  2.76it/s, auc=区域AUC: 0.482, 时间AUC: 0.273, 综合AUC: 0.472]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 74%|███████▍  | 74/100 [00:27<00:09,  2.76it/s, auc=区域AUC: 0.481, 时间AUC: 0.273, 综合AUC: 0.472] 75%|███████▌  | 75/100 [00:27<00:09,  2.77it/s, auc=区域AUC: 0.481, 时间AUC: 0.273, 综合AUC: 0.472]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 75%|███████▌  | 75/100 [00:28<00:09,  2.77it/s, auc=区域AUC: 0.481, 时间AUC: 0.364, 综合AUC: 0.493] 76%|███████▌  | 76/100 [00:28<00:08,  2.77it/s, auc=区域AUC: 0.481, 时间AUC: 0.364, 综合AUC: 0.493]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 76%|███████▌  | 76/100 [00:28<00:08,  2.77it/s, auc=区域AUC: 0.483, 时间AUC: 0.455, 综合AUC: 0.514] 77%|███████▋  | 77/100 [00:28<00:08,  2.77it/s, auc=区域AUC: 0.483, 时间AUC: 0.455, 综合AUC: 0.514]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 77%|███████▋  | 77/100 [00:28<00:08,  2.77it/s, auc=区域AUC: 0.478, 时间AUC: 0.455, 综合AUC: 0.512] 78%|███████▊  | 78/100 [00:28<00:08,  2.73it/s, auc=区域AUC: 0.478, 时间AUC: 0.455, 综合AUC: 0.512]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+检测到的区域异常数量: 245
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3030
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.481, 时间AUC: 0.182, 综合AUC: 0.451
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1016, 0.4626]
+时间分数范围: [-0.8534, -0.4393]
+检测到的区域异常数量: 245
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3048
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.481, 时间AUC: 0.273, 综合AUC: 0.472
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0834, 0.4831]
+时间分数范围: [-0.8361, -0.4415]
+检测到的区域异常数量: 248
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3051
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.481, 时间AUC: 0.273, 综合AUC: 0.472
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1258, 0.4696]
+时间分数范围: [-0.8280, -0.4609]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3004
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.479, 时间AUC: 0.273, 综合AUC: 0.471
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0576, 0.5202]
+时间分数范围: [-0.8375, -0.4432]
+检测到的区域异常数量: 255
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3092
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.484, 时间AUC: 0.273, 综合AUC: 0.473
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1398, 0.4841]
+时间分数范围: [-0.8415, -0.4776]
+检测到的区域异常数量: 240
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2972
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.478, 时间AUC: 0.273, 综合AUC: 0.471
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0639, 0.5335]
+时间分数范围: [-0.8537, -0.4675]
+检测到的区域异常数量: 254
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3084
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.482, 时间AUC: 0.273, 综合AUC: 0.472
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1073, 0.5162]
+时间分数范围: [-0.8573, -0.4937]
+检测到的区域异常数量: 245
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3012
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.481, 时间AUC: 0.273, 综合AUC: 0.472
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1030, 0.5249]
+时间分数范围: [-0.8543, -0.5062]
+检测到的区域异常数量: 245
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3012
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.481, 时间AUC: 0.364, 综合AUC: 0.493
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0521, 0.5590]
+时间分数范围: [-0.8521, -0.4998]
+检测到的区域异常数量: 255
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3092
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.483, 时间AUC: 0.455, 综合AUC: 0.514
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1430, 0.5137]
+时间分数范围: [-0.8440, -0.5278]
+检测到的区域异常数量: 239
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2964
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.478, 时间AUC: 0.455, 综合AUC: 0.512
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0632, 0.5602]
+时间分数范围: [-0.8389, -0.5159]
+检测到的区域异常数量: 251
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3060
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+ 78%|███████▊  | 78/100 [00:29<00:08,  2.73it/s, auc=区域AUC: 0.483, 时间AUC: 0.455, 综合AUC: 0.514] 79%|███████▉  | 79/100 [00:29<00:07,  2.72it/s, auc=区域AUC: 0.483, 时间AUC: 0.455, 综合AUC: 0.514]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 79%|███████▉  | 79/100 [00:29<00:07,  2.72it/s, auc=区域AUC: 0.483, 时间AUC: 0.455, 综合AUC: 0.514] 80%|████████  | 80/100 [00:29<00:07,  2.75it/s, auc=区域AUC: 0.483, 时间AUC: 0.455, 综合AUC: 0.514]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 80%|████████  | 80/100 [00:29<00:07,  2.75it/s, auc=区域AUC: 0.479, 时间AUC: 0.545, 综合AUC: 0.533] 81%|████████  | 81/100 [00:29<00:06,  2.75it/s, auc=区域AUC: 0.479, 时间AUC: 0.545, 综合AUC: 0.533]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 81%|████████  | 81/100 [00:30<00:06,  2.75it/s, auc=区域AUC: 0.487, 时间AUC: 0.636, 综合AUC: 0.556] 82%|████████▏ | 82/100 [00:30<00:06,  2.76it/s, auc=区域AUC: 0.487, 时间AUC: 0.636, 综合AUC: 0.556]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 82%|████████▏ | 82/100 [00:30<00:06,  2.76it/s, auc=区域AUC: 0.479, 时间AUC: 0.636, 综合AUC: 0.554] 83%|████████▎ | 83/100 [00:30<00:06,  2.76it/s, auc=区域AUC: 0.479, 时间AUC: 0.636, 综合AUC: 0.554]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 83%|████████▎ | 83/100 [00:30<00:06,  2.76it/s, auc=区域AUC: 0.483, 时间AUC: 0.636, 综合AUC: 0.555] 84%|████████▍ | 84/100 [00:30<00:05,  2.74it/s, auc=区域AUC: 0.483, 时间AUC: 0.636, 综合AUC: 0.555]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 84%|████████▍ | 84/100 [00:31<00:05,  2.74it/s, auc=区域AUC: 0.487, 时间AUC: 0.636, 综合AUC: 0.556] 85%|████████▌ | 85/100 [00:31<00:05,  2.76it/s, auc=区域AUC: 0.487, 时间AUC: 0.636, 综合AUC: 0.556]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 85%|████████▌ | 85/100 [00:31<00:05,  2.76it/s, auc=区域AUC: 0.480, 时间AUC: 0.636, 综合AUC: 0.554] 86%|████████▌ | 86/100 [00:31<00:05,  2.78it/s, auc=区域AUC: 0.480, 时间AUC: 0.636, 综合AUC: 0.554]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 86%|████████▌ | 86/100 [00:32<00:05,  2.78it/s, auc=区域AUC: 0.486, 时间AUC: 0.636, 综合AUC: 0.556] 87%|████████▋ | 87/100 [00:32<00:04,  2.78it/s, auc=区域AUC: 0.486, 时间AUC: 0.636, 综合AUC: 0.556]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 87%|████████▋ | 87/100 [00:32<00:04,  2.78it/s, auc=区域AUC: 0.482, 时间AUC: 0.636, 综合AUC: 0.555] 88%|████████▊ | 88/100 [00:32<00:04,  2.79it/s, auc=区域AUC: 0.482, 时间AUC: 0.636, 综合AUC: 0.555]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 88%|████████▊ | 88/100 [00:32<00:04,  2.79it/s, auc=区域AUC: 0.480, 时间AUC: 0.636, 综合AUC: 0.554] 89%|████████▉ | 89/100 [00:32<00:03,  2.80it/s, auc=区域AUC: 0.480, 时间AUC: 0.636, 综合AUC: 0.554]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.483, 时间AUC: 0.455, 综合AUC: 0.514
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1054, 0.5416]
+时间分数范围: [-0.8330, -0.5358]
+检测到的区域异常数量: 245
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3012
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.483, 时间AUC: 0.455, 综合AUC: 0.514
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1406, 0.5275]
+时间分数范围: [-0.8272, -0.5532]
+检测到的区域异常数量: 239
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2940
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.479, 时间AUC: 0.545, 综合AUC: 0.533
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0547, 0.5797]
+时间分数范围: [-0.8152, -0.5458]
+检测到的区域异常数量: 253
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3076
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.487, 时间AUC: 0.636, 综合AUC: 0.556
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1485, 0.5336]
+时间分数范围: [-0.8006, -0.5793]
+检测到的区域异常数量: 238
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2956
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.479, 时间AUC: 0.636, 综合AUC: 0.554
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1197, 0.5557]
+时间分数范围: [-0.7947, -0.5752]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3004
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.483, 时间AUC: 0.636, 综合AUC: 0.555
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.0931, 0.5776]
+时间分数范围: [-0.7995, -0.5677]
+检测到的区域异常数量: 245
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3012
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.487, 时间AUC: 0.636, 综合AUC: 0.556
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1463, 0.5542]
+时间分数范围: [-0.8156, -0.5767]
+检测到的区域异常数量: 238
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2956
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.480, 时间AUC: 0.636, 综合AUC: 0.554
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1133, 0.5779]
+时间分数范围: [-0.8245, -0.5714]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3004
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.486, 时间AUC: 0.636, 综合AUC: 0.556
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1450, 0.5646]
+时间分数范围: [-0.8167, -0.5631]
+检测到的区域异常数量: 238
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2981
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.482, 时间AUC: 0.636, 综合AUC: 0.555
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1557, 0.5631]
+时间分数范围: [-0.8027, -0.5576]
+检测到的区域异常数量: 238
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2981
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.480, 时间AUC: 0.636, 综合AUC: 0.554
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1193, 0.5887]
+时间分数范围: [-0.7964, -0.5581]
+检测到的区域异常数量: 243
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3016
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+ 89%|████████▉ | 89/100 [00:33<00:03,  2.80it/s, auc=区域AUC: 0.488, 时间AUC: 0.636, 综合AUC: 0.556] 90%|█████████ | 90/100 [00:33<00:03,  2.80it/s, auc=区域AUC: 0.488, 时间AUC: 0.636, 综合AUC: 0.556]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 90%|█████████ | 90/100 [00:33<00:03,  2.80it/s, auc=区域AUC: 0.478, 时间AUC: 0.636, 综合AUC: 0.554] 91%|█████████ | 91/100 [00:33<00:03,  2.80it/s, auc=区域AUC: 0.478, 时间AUC: 0.636, 综合AUC: 0.554]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 91%|█████████ | 91/100 [00:33<00:03,  2.80it/s, auc=区域AUC: 0.489, 时间AUC: 0.636, 综合AUC: 0.556] 92%|█████████▏| 92/100 [00:33<00:02,  2.80it/s, auc=区域AUC: 0.489, 时间AUC: 0.636, 综合AUC: 0.556]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 92%|█████████▏| 92/100 [00:34<00:02,  2.80it/s, auc=区域AUC: 0.476, 时间AUC: 0.727, 综合AUC: 0.574] 93%|█████████▎| 93/100 [00:34<00:02,  2.81it/s, auc=区域AUC: 0.476, 时间AUC: 0.727, 综合AUC: 0.574]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 93%|█████████▎| 93/100 [00:34<00:02,  2.81it/s, auc=区域AUC: 0.487, 时间AUC: 0.818, 综合AUC: 0.597] 94%|█████████▍| 94/100 [00:34<00:02,  2.80it/s, auc=区域AUC: 0.487, 时间AUC: 0.818, 综合AUC: 0.597]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 94%|█████████▍| 94/100 [00:34<00:02,  2.80it/s, auc=区域AUC: 0.477, 时间AUC: 0.818, 综合AUC: 0.595] 95%|█████████▌| 95/100 [00:34<00:01,  2.80it/s, auc=区域AUC: 0.477, 时间AUC: 0.818, 综合AUC: 0.595]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 95%|█████████▌| 95/100 [00:35<00:01,  2.80it/s, auc=区域AUC: 0.482, 时间AUC: 0.727, 综合AUC: 0.575] 96%|█████████▌| 96/100 [00:35<00:01,  2.80it/s, auc=区域AUC: 0.482, 时间AUC: 0.727, 综合AUC: 0.575]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 96%|█████████▌| 96/100 [00:35<00:01,  2.80it/s, auc=区域AUC: 0.481, 时间AUC: 0.727, 综合AUC: 0.575] 97%|█████████▋| 97/100 [00:35<00:01,  2.79it/s, auc=区域AUC: 0.481, 时间AUC: 0.727, 综合AUC: 0.575]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 97%|█████████▋| 97/100 [00:35<00:01,  2.79it/s, auc=区域AUC: 0.478, 时间AUC: 0.727, 综合AUC: 0.574] 98%|█████████▊| 98/100 [00:35<00:00,  2.78it/s, auc=区域AUC: 0.478, 时间AUC: 0.727, 综合AUC: 0.574]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 98%|█████████▊| 98/100 [00:36<00:00,  2.78it/s, auc=区域AUC: 0.485, 时间AUC: 0.818, 综合AUC: 0.597] 99%|█████████▉| 99/100 [00:36<00:00,  2.78it/s, auc=区域AUC: 0.485, 时间AUC: 0.818, 综合AUC: 0.597]/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py:1467: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  x = torch.tensor(x, dtype=torch.float).to(self.device)
+ 99%|█████████▉| 99/100 [00:36<00:00,  2.78it/s, auc=区域AUC: 0.475, 时间AUC: 0.818, 综合AUC: 0.594]100%|██████████| 100/100 [00:36<00:00,  2.77it/s, auc=区域AUC: 0.475, 时间AUC: 0.818, 综合AUC: 0.594]100%|██████████| 100/100 [00:36<00:00,  2.73it/s, auc=区域AUC: 0.475, 时间AUC: 0.818, 综合AUC: 0.594]
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.488, 时间AUC: 0.636, 综合AUC: 0.556
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1832, 0.5529]
+时间分数范围: [-0.7975, -0.5761]
+检测到的区域异常数量: 237
+检测到的时间异常数量: 5
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2974
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.478, 时间AUC: 0.636, 综合AUC: 0.554
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1119, 0.5977]
+时间分数范围: [-0.7977, -0.5596]
+检测到的区域异常数量: 244
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3042
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.489, 时间AUC: 0.636, 综合AUC: 0.556
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1970, 0.5467]
+时间分数范围: [-0.7982, -0.5518]
+检测到的区域异常数量: 237
+检测到的时间异常数量: 6
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3000
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.476, 时间AUC: 0.727, 综合AUC: 0.574
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1270, 0.5934]
+时间分数范围: [-0.7803, -0.5161]
+检测到的区域异常数量: 242
+检测到的时间异常数量: 7
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3051
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.487, 时间AUC: 0.818, 综合AUC: 0.597
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1878, 0.5568]
+时间分数范围: [-0.7787, -0.5139]
+检测到的区域异常数量: 236
+检测到的时间异常数量: 8
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3048
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.477, 时间AUC: 0.818, 综合AUC: 0.595
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1655, 0.5716]
+时间分数范围: [-0.7625, -0.5089]
+检测到的区域异常数量: 237
+检测到的时间异常数量: 8
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3052
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.482, 时间AUC: 0.727, 综合AUC: 0.575
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1674, 0.5707]
+时间分数范围: [-0.7585, -0.5068]
+检测到的区域异常数量: 237
+检测到的时间异常数量: 8
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3052
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.481, 时间AUC: 0.727, 综合AUC: 0.575
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1889, 0.5582]
+时间分数范围: [-0.7684, -0.5040]
+检测到的区域异常数量: 236
+检测到的时间异常数量: 8
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3048
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.478, 时间AUC: 0.727, 综合AUC: 0.574
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1431, 0.5907]
+时间分数范围: [-0.7645, -0.4872]
+检测到的区域异常数量: 237
+检测到的时间异常数量: 9
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3078
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.485, 时间AUC: 0.818, 综合AUC: 0.597
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.2074, 0.5467]
+时间分数范围: [-0.7551, -0.4943]
+检测到的区域异常数量: 233
+检测到的时间异常数量: 8
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3036
+[DEBUG] 输入数据形状:
+x shape: torch.Size([263, 144, 14])
+y_true shape: torch.Size([263, 144, 14, 2])
+anomaly_scores shape: torch.Size([263, 12, 2])
+[DEBUG] 模型输出的patch时间步数: 12
+[DEBUG] 截取后的标签shape: (263, 12, 14, 2)
+[DEBUG] 展平后的标签shape: (44184, 2)
+[DEBUG] 展平后的分数shape: (44184, 2)
+区域AUC: 0.475, 时间AUC: 0.818, 综合AUC: 0.594
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [0.1204, 0.5786]
+时间分数范围: [-0.9058, -0.4932]
+检测到的区域异常数量: 263
+检测到的时间异常数量: 3
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 3156
+model.__dict__: {'contamination': 0.1, 'd_in': 14, 'd_model': 128, 'dim_k': 8, 'dim_v': 8, 'n_heads': 16, 'device': 'cuda', 'epoch': 100, 'lr': 0.001, 'verbose': True, 'tsfm_args': {'d_in': 14, 'd_model': 128, 'dim_k': 8, 'dim_v': 8, 'n_heads': 16, 'batch_size': -1}, 'alpha': 1.0, 'n_gcn': 3, 'log_interval': 1, 'beta': 1.0, 'threshold_method': 'quantile', 'loss_weight': tensor([0.3333, 0.3333, 0.3333]), 'model_args': {'seq_len': 144, 'patch_len': 12, 'stride': 6, 'd_in': 14, 'd_model': 128, 'n_heads': 16, 'n_gcn': 3, 'temporal_half': False, 'spatial_half': False, 'static_only': False, 'dynamic_only': False, 'temperature': 50.0, 'anormly_ratio': 0.1, 'dist_mats': tensor([[[ 1.0000,  1.0000,  1.0000,  ...,  1.0000,  1.0000,  1.0000],
+         [ 1.0000,  1.0000,  1.0000,  ...,  1.0000,  1.0000,  1.0000],
+         [ 1.0000,  1.0000,  1.0000,  ...,  1.0000,  1.0000,  1.0000],
+         ...,
+         [ 1.0000,  1.0000,  1.0000,  ...,  1.0000,  1.0000,  1.0000],
+         [ 1.0000,  1.0000,  1.0000,  ...,  1.0000,  1.0000,  0.0000],
+         [ 1.0000,  1.0000,  1.0000,  ...,  1.0000,  0.0000,  1.0000]],
+
+        [[ 0.0000, 30.1495, 33.5692,  ..., 13.7357, 21.3592, 21.1593],
+         [30.1495,  0.0000, 27.5358,  ..., 18.4718, 20.1760, 20.6357],
+         [33.5692, 27.5358,  0.0000,  ..., 22.1955, 12.9020, 12.9174],
+         ...,
+         [13.7357, 18.4718, 22.1955,  ...,  0.0000,  9.3018,  9.3361],
+         [21.3592, 20.1760, 12.9020,  ...,  9.3018,  0.0000,  0.4931],
+         [21.1593, 20.6357, 12.9174,  ...,  9.3361,  0.4931,  0.0000]],
+
+        [[ 1.0000,  0.0000,  0.0000,  ...,  0.0000,  0.0000,  0.0000],
+         [ 0.0000,  1.0000,  0.0000,  ...,  0.0000,  0.0000,  0.0000],
+         [ 0.0000,  0.0000,  1.0000,  ...,  0.0000,  0.0000,  0.0000],
+         ...,
+         [ 0.0000,  0.0000,  0.0000,  ...,  1.0000,  0.0000,  0.0000],
+         [ 0.0000,  0.0000,  0.0000,  ...,  0.0000,  1.0000,  0.0000],
+         [ 0.0000,  0.0000,  0.0000,  ...,  0.0000,  0.0000,  1.0000]]],
+       device='cuda:0')}, 'region_threshold': tensor(-0.0086), 'time_threshold': tensor(-0.6435), 'early_stopping': <STAnomalyFormer.interface.utils.EarlyStopping object at 0x7fa13e4b8310>, 'model': STPatch_MGCNFormer(
+  (revin): RevIN()
+  (patch): Patch()
+  (patch_tsfm): PatchEncoder(
+    (W_P): ModuleList(
+      (0-13): 14 x Linear(in_features=12, out_features=128, bias=True)
+    )
+    (dropout): Dropout(p=0.1, inplace=False)
+    (encoder): TemporalTransformer(
+      (attn): MultiheadAttention(
+        (q): Linear(in_features=128, out_features=128, bias=True)
+        (k): Linear(in_features=128, out_features=128, bias=True)
+        (v): Linear(in_features=128, out_features=128, bias=True)
+        (o): Linear(in_features=128, out_features=128, bias=True)
+      )
+      (conv1): Conv1d(128, 256, kernel_size=(1,), stride=(1,))
+      (norm1): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+      (dropout): Dropout(p=0.1, inplace=False)
+      (conv2): Conv1d(256, 128, kernel_size=(1,), stride=(1,))
+      (norm2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+    )
+  )
+  (spatial_tsfm): TemporalTransformer(
+    (attn): MultiheadAttention(
+      (q): Linear(in_features=128, out_features=128, bias=True)
+      (k): Linear(in_features=128, out_features=128, bias=True)
+      (v): Linear(in_features=128, out_features=128, bias=True)
+      (o): Linear(in_features=128, out_features=128, bias=True)
+    )
+    (conv1): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+    (norm1): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+    (dropout): Dropout(p=0.1, inplace=False)
+    (conv2): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+    (norm2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+  )
+  (da_gcn): MultipleGCN(
+    (sigma): Linear(in_features=3, out_features=263, bias=True)
+    (linears): ModuleList(
+      (0-3): 4 x Linear(in_features=128, out_features=128, bias=False)
+    )
+  )
+  (proj_dy): Sequential(
+    (0): Dropout(p=0.1, inplace=False)
+    (1): Linear(in_features=128, out_features=12, bias=True)
+  )
+  (proj_st): Sequential(
+    (0): Dropout(p=0.1, inplace=False)
+    (1): Linear(in_features=128, out_features=12, bias=True)
+  )
+), 'decision_scores_': tensor([[[ 0.2773, -0.8787],
+         [ 0.2773, -0.6635],
+         [ 0.2773, -0.8626],
+         ...,
+         [ 0.2773, -0.6962],
+         [ 0.2773, -0.9058],
+         [ 0.2773, -0.5438]],
+
+        [[ 0.5205, -0.8787],
+         [ 0.5205, -0.6635],
+         [ 0.5205, -0.8626],
+         ...,
+         [ 0.5205, -0.6962],
+         [ 0.5205, -0.9058],
+         [ 0.5205, -0.5438]],
+
+        [[ 0.3261, -0.8787],
+         [ 0.3261, -0.6635],
+         [ 0.3261, -0.8626],
+         ...,
+         [ 0.3261, -0.6962],
+         [ 0.3261, -0.9058],
+         [ 0.3261, -0.5438]],
+
+        ...,
+
+        [[ 0.1956, -0.8787],
+         [ 0.1956, -0.6635],
+         [ 0.1956, -0.8626],
+         ...,
+         [ 0.1956, -0.6962],
+         [ 0.1956, -0.9058],
+         [ 0.1956, -0.5438]],
+
+        [[ 0.1919, -0.8787],
+         [ 0.1919, -0.6635],
+         [ 0.1919, -0.8626],
+         ...,
+         [ 0.1919, -0.6962],
+         [ 0.1919, -0.9058],
+         [ 0.1919, -0.5438]],
+
+        [[ 0.2273, -0.8787],
+         [ 0.2273, -0.6635],
+         [ 0.2273, -0.8626],
+         ...,
+         [ 0.2273, -0.6962],
+         [ 0.2273, -0.9058],
+         [ 0.2273, -0.5438]]]), 'labels_': array([1., 1., 1., ..., 0., 1., 1.], dtype=float32), 'threshold_': -0.905794620513916}
+model.decision_function.__dict__: {'__wrapped__': <function STAnomalyFormerDetector_v4.decision_function at 0x7fa1fc5e2ef0>}
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1278, 0.4669]
+时间分数范围: [-0.8310, -0.4659]
+检测到的区域异常数量: 240
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2972
+model.decision_function 返回字典的键名: dict_keys(['anomaly_scores', 'region_scores', 'time_scores', 'anomaly_events', 'region_threshold', 'time_threshold'])
+[DEBUG] 检测异常:
+区域分数形状: torch.Size([263])
+时间分数形状: torch.Size([12])
+区域分数范围: [-0.1278, 0.4669]
+时间分数范围: [-0.8310, -0.4659]
+检测到的区域异常数量: 240
+检测到的时间异常数量: 4
+区域阈值: -0.0086
+时间阈值: -0.6435
+最终检测到的异常事件数量: 2972
+警告：区域异常评估出错 - Found input variables with inconsistent numbers of samples: [37872, 3156]
+警告：时间异常评估出错 - Found input variables with inconsistent numbers of samples: [37872, 3156]
+警告：综合评估出错 - Found input variables with inconsistent numbers of samples: [75744, 6312]
+Traceback (most recent call last):
+  File "/workspace/DSCL/DSCL-master/exper_nyc.py", line 205, in <module>
+    region_recall_k1 = recall_k(y_reshaped[:, 0, 0, 0], region_scores.cpu().numpy().flatten(), k1)
+  File "/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/utils.py", line 24, in recall_k
+    return np.sum(actual[sort_index[-k:]]) / np.sum(actual)
+IndexError: index 2928 is out of bounds for axis 0 with size 263
