@@ -1,10 +1,28 @@
 import torch
 from torch import nn
 import numpy as np
+from sklearn.metrics import roc_auc_score
 
 def kl_loss(p, q):
     res = p * (torch.log(p + 1e-8) - torch.log(q + 1e-8))
     return res  # 不取平均，保持维度信息
+
+def recall_k(y_true, y_score, k):
+    """自定义recall@k函数，计算y_true中为1的样本在y_score排序后前k个样本中出现的比例。"""
+    if k <= 0:
+        raise ValueError("k必须为正整数")
+    # 将y_true、y_score转为numpy数组，并确保一维
+    y_true = np.asarray(y_true).flatten()
+    y_score = np.asarray(y_score).flatten()
+    if len(y_true) != len(y_score):
+        raise ValueError("y_true与y_score长度不一致")
+    # 按y_score降序排序，取前k个索引
+    sort_index = np.argsort(y_score)[::-1][:k]
+    # 计算前k个样本中，y_true为1的样本数，并除以y_true中1的总数（若总数为0则返回0）
+    n_anomaly = np.sum(y_true == 1)
+    if n_anomaly == 0:
+        return 0.0
+    return np.sum(y_true[sort_index] == 1) / n_anomaly
 
 from .embed import TemporalEmbedding
 from .module import (

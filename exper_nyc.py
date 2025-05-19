@@ -72,6 +72,10 @@ torch.backends.cudnn.deterministic = True
 score_list = []
 X, val_X, test_X, (adj, dist, poi_sim), y = load_dataset(args)
 
+# 在读取数据后，定义全局区域编号（例如，从X的shape中提取，假设X的shape为 (263, 144, 14)，即全局区域编号为0,1,…,262）
+global_ids = list(range(X.shape[0]))
+print("全局区域编号列表（示例）:", global_ids[: 5])
+
 # 打印原始shape
 print("原始数据shape:", X.shape)
 
@@ -146,6 +150,13 @@ print(f"标签y_reshaped形状: {y_reshaped.shape}")
 print(f"验证集形状: {val_X.shape}")
 print(f"测试集形状: {test_X.shape}")
 
+# 在计算邻接矩阵后，增加映射字典，将全局区域编号映射到邻接矩阵索引（0到262）
+# 假设全局区域编号（例如，pickup_location_id 或 dropoff_location_id）存储在全局变量 global_ids 中，且邻接矩阵 adj 的 shape 为 (263, 263)
+# 如果 global_ids 未定义，请根据数据预处理部分（例如，读取数据时）进行定义，例如：
+# global_ids = sorted(df['pickup_location_id'].unique())
+global_to_adj_idx = {global_id: i for i, global_id in enumerate(sorted(global_ids))}
+print("全局区域编号到邻接矩阵索引的映射字典（示例）:", dict(list(global_to_adj_idx.items())[: 5]))
+
 for t in range(args.repeat):
     print("{}-th experiment:".format(t + 1))
 
@@ -177,40 +188,52 @@ for t in range(args.repeat):
     anomaly_scores = output_dict['anomaly_scores']  # [N, T, 2]
     region_scores = anomaly_scores[:, :, 0]        # [N, T]
     time_scores = anomaly_scores[:, :, 1]          # [N, T]
-    
-    # 计算区域异常评估指标
+
+    # 只用patch范围内的标签
+    N, T_patch = region_scores.shape
+    y_region_patch = y_reshaped[:, :T_patch, 0, 0]  # [N, T_patch]
+    y_time_patch = y_reshaped[:, :T_patch, 0, 1]    # [N, T_patch]
+
+    # 区域AUC
     try:
-        region_auc = roc_auc_score(y_reshaped[:, :, 0, 0].flatten(), region_scores.cpu().numpy().flatten())
+        region_auc = roc_auc_score(y_region_patch.flatten(), region_scores.cpu().numpy().flatten())
     except ValueError as e:
         print(f"警告：区域异常评估出错 - {str(e)}")
         region_auc = 0.0
-    
-    # 计算时间异常评估指标
+
+    # 时间AUC
     try:
-        time_auc = roc_auc_score(y_reshaped[:, :, 0, 1].flatten(), time_scores.cpu().numpy().flatten())
+        time_auc = roc_auc_score(y_time_patch.flatten(), time_scores.cpu().numpy().flatten())
     except ValueError as e:
         print(f"警告：时间异常评估出错 - {str(e)}")
         time_auc = 0.0
-    
-    # 计算综合评估指标
+
+    # 综合AUC
     try:
-        combined_auc = roc_auc_score(y_reshaped[:, :, 0, :].flatten(), anomaly_scores.cpu().numpy().flatten())
+        combined_auc = roc_auc_score(
+            np.stack([y_region_patch.flatten(), y_time_patch.flatten()], axis=1).flatten(),
+            anomaly_scores.cpu().numpy().flatten()
+        )
     except ValueError as e:
         print(f"警告：综合评估出错 - {str(e)}")
         combined_auc = 0.0
-    
-    # 计算区域异常的recall@k
-    k1 = np.ceil(263 // 10).astype(int)
-    k2 = np.ceil(263 // 5).astype(int)
-    region_recall_k1 = recall_k(y_reshaped[:, 0, 0, 0], region_scores.cpu().numpy().flatten(), k1)
-    region_recall_k2 = recall_k(y_reshaped[:, 0, 0, 0], region_scores.cpu().numpy().flatten(), k2)
-    
-    # 计算时间异常的recall@k
-    k1 = np.ceil(144 // 10).astype(int)
-    k2 = np.ceil(144 // 5).astype(int)
-    time_recall_k1 = recall_k(y_reshaped[0, 0, 0, 1], time_scores.cpu().numpy().flatten(), k1)
-    time_recall_k2 = recall_k(y_reshaped[0, 0, 0, 1], time_scores.cpu().numpy().flatten(), k2)
-    
+
+    # 区域recall@k（对每个区域取均值后排序）
+    region_scores_mean = region_scores.mean(axis=1)  # [N]
+    y_region_label = (y_region_patch.mean(axis=1) > 0).astype(int)  # [N]
+    k1 = np.ceil(N // 10).astype(int)
+    k2 = np.ceil(N // 5).astype(int)
+    region_recall_k1 = recall_k(y_region_label, region_scores_mean, k1)
+    region_recall_k2 = recall_k(y_region_label, region_scores_mean, k2)
+
+    # 时间recall@k（对每个时间槽取均值后排序）
+    time_scores_mean = time_scores.mean(axis=0)  # [T_patch]
+    y_time_label = (y_time_patch.mean(axis=0) > 0).astype(int)  # [T_patch]
+    k1 = np.ceil(T_patch // 10).astype(int)
+    k2 = np.ceil(T_patch // 5).astype(int)
+    time_recall_k1 = recall_k(y_time_label, time_scores_mean, k1)
+    time_recall_k2 = recall_k(y_time_label, time_scores_mean, k2)
+
     score_list.append([
         region_recall_k1, region_recall_k2, region_auc,  # 区域异常指标
         time_recall_k1, time_recall_k2, time_auc,        # 时间异常指标
