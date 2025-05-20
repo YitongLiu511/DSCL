@@ -205,13 +205,22 @@ class SingleGCN(nn.Module):
         return x, prior
 
 
-class MultipleGCN(nn.Module):
+class AdaptiveGaussianKernel(nn.Module):
+    def __init__(self, n_views):
+        super().__init__()
+        self.sigma = nn.Parameter(torch.ones(n_views))  # 可学习的sigma参数
+        
+    def forward(self, dist_mat):
+        # 计算自适应高斯核
+        return torch.exp(-dist_mat.pow(2) / (2 * self.sigma.pow(2)))
 
+
+class MultipleGCN(nn.Module):
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        matrices: torch.tensor,
+        dist_mats: List[torch.Tensor],
         n_layers: int = 1,
         activation=F.relu,
         bias: bool = False,
@@ -219,63 +228,45 @@ class MultipleGCN(nn.Module):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.dist_mats = dist_mats
         self.n_layers = n_layers
         self.activation = activation
-
-        self.n_graph = matrices.shape[0]
-        self.matrices = matrices  # (3, N, N)
-
-        self.sigma = nn.Linear(self.n_graph, matrices.shape[-1])
-        self.alpha = nn.parameter.Parameter(
-            torch.ones(self.n_graph) / self.n_graph)
-        self.linears = nn.ModuleList(
-            [nn.Linear(in_channels, out_channels, bias=bias)] + [
-                nn.Linear(out_channels, out_channels, bias=bias)
-                for _ in range(n_layers)
-            ])
-        self.mask = self.generate_mask()
-
-    def generate_mask(self):
-        # 距离为0的位置设为1
-        matrix = (self.matrices.cpu().detach().numpy() == 0.).astype(int)
-        # 对角线设为0
-        matrix[:, range(matrix.shape[1]), range(matrix.shape[1])] = 0
-        return torch.Tensor(matrix) == 1
-
+        
+        # 为每个距离矩阵创建GCN层
+        self.gcn_layers = nn.ModuleList([
+            SingleGCN(
+                in_channels,
+                out_channels,
+                dist_mat,
+                n_layers,
+                activation,
+                bias
+            ) for dist_mat in dist_mats
+        ])
+        
+        # 融合层
+        self.fusion = nn.Linear(len(dist_mats) * out_channels, out_channels)
+        
     def forward(self, x):
-        # x: (VAR * NP, N, D)
-        B, N, D = x.shape
-        prior = self.STS  # (N, N)
+        # 对每个视图进行GCN处理
+        outputs = []
+        attention_maps = []
         
-        # 重塑x以适应矩阵乘法
-        x_reshaped = x.reshape(-1, N, D)  # (B, N, D)
+        for gcn in self.gcn_layers:
+            out, attn = gcn(x)
+            outputs.append(out)
+            attention_maps.append(attn)
         
-        for i in range(self.n_layers):
-            # 执行矩阵乘法
-            wx = torch.matmul(prior, x_reshaped)  # (B, N, D)
-            x_reshaped = self.activation(self.linears[i](wx))
+        # 拼接所有视图的输出
+        combined = torch.cat(outputs, dim=-1)
         
-        # 恢复原始形状
-        x = x_reshaped.reshape(B, N, D)
-        return x, prior
-
-    @property
-    def STS(self):
-        sigma = self.sigma.weight.reshape(self.n_graph, 1, -1)
-        sigma = torch.sigmoid(sigma * 5) + 1e-5
-        sigma = torch.pow(3, sigma) - 1
+        # 融合不同视图的特征
+        fused = self.fusion(combined)
         
-        # 计算每个图的先验概率
-        exp = torch.exp(-self.matrices / (2 * sigma**2))
-        prior = exp / (math.sqrt(2 * math.pi) * sigma)
-        prior = prior.masked_fill(self.mask.to(exp.device), 0)
+        # 计算平均注意力图
+        avg_attention = torch.stack(attention_maps).mean(dim=0)
         
-        # 归一化
-        prior = prior / (prior.sum(1, keepdims=True) + 1e-8)
-        
-        # 合并多个图的先验概率
-        prior = torch.matmul(prior.permute(1, 2, 0), torch.softmax(self.alpha, 0))
-        return prior  # (N, N)
+        return fused, avg_attention
 
 
 def MLP(

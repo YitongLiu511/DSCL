@@ -5,6 +5,57 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import os
 
+def inject_temporal_anomaly(X, mu=0.5, anomaly_ratio=0.1):
+    """注入时间异常
+    Args:
+        X: 输入数据，形状为 (N, T, D)
+        mu: 流量限制阈值
+        anomaly_ratio: 异常区域比例
+    """
+    N, T, D = X.shape
+    n_anomaly = int(N * anomaly_ratio)
+    
+    # 随机选择区域
+    anomaly_regions = np.random.choice(N, n_anomaly, replace=False)
+    
+    # 对选中的区域注入异常
+    for n in anomaly_regions:
+        max_flow = np.max(X[n])
+        X[n] = np.minimum(X[n], mu * max_flow)
+    
+    return X, anomaly_regions
+
+def inject_spatial_anomaly(X, k=0.1, anomaly_ratio=0.1):
+    """注入空间异常
+    Args:
+        X: 输入数据，形状为 (N, T, D)
+        k: 采样节点比例
+        anomaly_ratio: 异常区域比例
+    """
+    N, T, D = X.shape
+    n_anomaly = int(N * anomaly_ratio)
+    k_nodes = int(N * k)
+    
+    # 随机选择区域
+    anomaly_regions = np.random.choice(N, n_anomaly, replace=False)
+    
+    # 对选中的区域注入异常
+    for n in anomaly_regions:
+        # 随机采样k个节点
+        sampled_nodes = np.random.choice(N, k_nodes, replace=False)
+        # 计算与当前节点的最大差异
+        max_diff = 0
+        max_diff_node = None
+        for i in sampled_nodes:
+            diff = np.linalg.norm(X[n] - X[i])
+            if diff > max_diff:
+                max_diff = diff
+                max_diff_node = i
+        # 替换流量
+        X[n] = X[max_diff_node]
+    
+    return X, anomaly_regions
+
 def load_dataset(args):
     """
     加载纽约出租车数据集
@@ -147,6 +198,20 @@ def load_dataset(args):
     # 只使用前required_days天的数据
     flow_values = flow_values[:required_days]
     
+    # 注入时间异常
+    flow_values, temporal_anomalies = inject_temporal_anomaly(
+        flow_values.copy(), 
+        mu=0.5, 
+        anomaly_ratio=args.anormly_ratio
+    )
+    
+    # 注入空间异常
+    flow_values, spatial_anomalies = inject_spatial_anomaly(
+        flow_values.copy(),
+        k=0.1,
+        anomaly_ratio=args.anormly_ratio
+    )
+    
     # 按时间顺序划分
     X = flow_values[:train_size]
     val_X = flow_values[train_size:train_size + val_size]
@@ -155,38 +220,28 @@ def load_dataset(args):
     # 生成标签（这里需要根据实际需求修改）
     n_zones = adj.shape[0]  # 区域数量
     n_time_slots = test_X.shape[1]  # 时间槽数量
-    y = np.zeros((n_zones, n_time_slots))  # 初始化所有区域和时间槽为正常
+    y = np.zeros((n_zones, n_time_slots, 2))  # 初始化所有区域和时间槽为正常
     
-    # 根据anormly_ratio参数生成异常标签
-    if isinstance(args, dict):
-        anomaly_ratio = args.get('anormly_ratio', 0.1)
-    else:
-        anomaly_ratio = args.anormly_ratio
-        
-    # 计算需要标记为异常的总数量
-    total_cells = n_zones * n_time_slots
-    n_anomalies = int(total_cells * anomaly_ratio)
+    # 设置时间异常标签
+    for n in temporal_anomalies:
+        y[n, :, 0] = 1
     
-    # 随机选择要标记为异常的位置
-    anomaly_indices = np.random.choice(total_cells, n_anomalies, replace=False)
-    anomaly_zones = anomaly_indices // n_time_slots
-    anomaly_times = anomaly_indices % n_time_slots
-    
-    # 将选中的位置标记为异常
-    y[anomaly_zones, anomaly_times] = 1
+    # 设置空间异常标签
+    for n in spatial_anomalies:
+        y[n, :, 1] = 1
     
     print(f"\n标签统计:")
-    print(f"总单元格数: {total_cells}")
-    print(f"正常单元格数: {np.sum(y == 0)}")
-    print(f"异常单元格数: {np.sum(y == 1)}")
-    print(f"异常比例: {np.mean(y == 1) * 100:.2f}%")
-    print(f"每个区域的异常时间槽数量: {np.sum(y, axis=1)}")
-    print(f"每个时间槽的异常区域数量: {np.sum(y, axis=0)}")
+    print(f"总单元格数: {n_zones * n_time_slots}")
+    print(f"正常单元格数: {np.sum(y[:, :, 0] == 0)}")
+    print(f"异常单元格数: {np.sum(y[:, :, 1] == 1)}")
+    print(f"异常比例: {np.mean(y[:, :, 1] == 1) * 100:.2f}%")
+    print(f"每个区域的异常时间槽数量: {np.sum(y[:, :, 0], axis=1)}")
+    print(f"每个时间槽的异常区域数量: {np.sum(y[:, :, 0], axis=0)}")
     
     # 将标签重塑为与输入数据相同的形状
-    y = y.reshape(n_zones, n_time_slots)  # 确保标签形状正确
-    y = y.T  # 转置为 (时间槽, 区域)
-    y = y.reshape(1, n_time_slots, n_zones)  # 添加天数维度
+    y = y.reshape(n_zones, n_time_slots, 2)  # 确保标签形状正确
+    y = y.transpose(1, 0, 2)  # 转置为 (时间槽, 区域, 异常类型)
+    y = y.reshape(1, n_time_slots, n_zones, 2)  # 添加天数维度
     y = np.repeat(y, test_X.shape[0], axis=0)  # 复制到与test_X相同的天数
     
     return X, val_X, test_X, (adj, dist, poi_sim), y

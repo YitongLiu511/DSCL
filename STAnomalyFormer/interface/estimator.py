@@ -24,7 +24,10 @@ from .utils import predict_by_score, EarlyStopping
 
 def kl_loss(p, q):
     res = p * (torch.log(p + 1e-8) - torch.log(q + 1e-8))
-    return torch.mean(torch.mean(res, dim=(0, 1)), dim=1)
+    # 确保输入是2D张量
+    if len(res.shape) > 2:
+        res = res.reshape(res.size(0), -1)
+    return torch.mean(res, dim=-1)
 
 
 def sym_kl_loss(p, q):
@@ -775,155 +778,71 @@ class STAnomalyFormerDetector_v1(BaseDetector):
         score = self.decision_function(x)
         return predict_by_score(score, self.contamination)
 
-    @torch.no_grad()
-    def decision_function(self, x, return_dict=False):
-        self.model.eval()
-        x = torch.tensor(x, dtype=torch.float).to(self.device)
-        
-        # 获取模型输出
-        output_dict = self.model(x, return_dict=True)
-        
-        # 确保分数维度正确
-        region_scores = output_dict['region_scores']  # [N, T]
-        time_scores = output_dict['time_scores']      # [N, T]
-        
-        # 将分数组合成[N, T, 2]的形式
-        anomaly_scores = torch.stack([region_scores, time_scores], dim=-1)
-        
-        # 计算阈值
-        self.region_threshold = self.calculate_adaptive_threshold(region_scores)
-        self.time_threshold = self.calculate_adaptive_threshold(time_scores)
-        
-        # 检测异常事件
-        anomaly_events = {
-            'region_anomalies': (region_scores > self.region_threshold).int(),
-            'time_anomalies': (time_scores > self.time_threshold).int()
-        }
-        
-        if return_dict:
-            return {
-                'anomaly_scores': anomaly_scores,  # [N, T, 2]
-                'region_scores': region_scores,    # [N, T]
-                'time_scores': time_scores,        # [N, T]
-                'anomaly_events': anomaly_events,
-                'region_threshold': self.region_threshold,
-                'time_threshold': self.time_threshold
-            }
-        else:
-            return anomaly_scores.cpu().numpy()
-
-    def calculate_adaptive_threshold(self, scores, contamination=None):
-        if contamination is None:
-            contamination = self.contamination
-            
-        scores = scores.detach().cpu()
-        
-        # 添加调试信息
-        if self.verbose:
-            print(f"[DEBUG] 计算阈值:")
-            print(f"分数形状: {scores.shape}")
-            print(f"分数范围: [{scores.min():.4f}, {scores.max():.4f}]")
-            print(f"分数均值: {scores.mean():.4f}")
-            print(f"分数标准差: {scores.std():.4f}")
-        
-        # 确保分数不为全0
-        if torch.all(scores == 0):
-            print("[WARNING] 所有分数都为0，使用默认阈值")
-            return torch.tensor(0.5)
-        
-        if self.threshold_method == 'quantile':
-            # 使用更保守的分位数
-            threshold = torch.quantile(scores, 1 - contamination * 1.5)
-        elif self.threshold_method == 'mean':
-            # 使用均值加标准差的方法
-            mean = scores.mean()
-            std = scores.std()
-            threshold = mean + std * (1 - contamination)
-        elif self.threshold_method == 'max':
-            # 使用最大值的百分比
-            max_score = scores.max()
-            threshold = max_score * (1 - contamination)
-        else:
-            raise ValueError(f"不支持的阈值计算方法: {self.threshold_method}")
-        
-        # 确保阈值不为0
-        threshold = max(threshold, scores.mean() * 0.1)
-        
-        if self.verbose:
-            print(f"计算得到的阈值: {threshold:.4f}")
-            
-        return threshold
-
     def detect_anomalies(self, region_scores, time_scores):
-        region_scores = region_scores.detach().cpu()
-        time_scores = time_scores.detach().cpu()
+        """检测异常并返回异常事件和分数"""
+        # 确保输入张量的维度正确
+        if region_scores.dim() == 3:  # [263, 1, 1]
+            region_scores = region_scores.squeeze(-1).squeeze(-1)  # [263]
         
-        # 添加调试信息
-        if self.verbose:
-            print(f"[DEBUG] 检测异常:")
-            print(f"区域分数形状: {region_scores.shape}")
-            print(f"时间分数形状: {time_scores.shape}")
-            print(f"区域分数范围: [{region_scores.min():.4f}, {region_scores.max():.4f}]")
-            print(f"时间分数范围: [{time_scores.min():.4f}, {time_scores.max():.4f}]")
+        if time_scores.dim() == 4:  # [263, 23, 14, 1]
+            time_scores = time_scores.squeeze(-1)  # [263, 23, 14]
         
-        # 确保分数维度正确
-        if len(region_scores.shape) == 1:
-            region_scores = region_scores.unsqueeze(1)  # [N, 1]
-        if len(time_scores.shape) == 1:
-            time_scores = time_scores.unsqueeze(0)      # [1, T]
+        # 获取时间步数
+        n_times = time_scores.size(1)
+        
+        # 初始化异常分数张量
+        anomaly_scores = torch.zeros((region_scores.size(0), n_times, 2), device=region_scores.device)
+        
+        # 扩展区域得分到所有时间步
+        anomaly_scores[:, :, 0] = region_scores.unsqueeze(1).expand(-1, n_times)
+        
+        # 计算时间异常得分
+        anomaly_scores[:, :, 1] = time_scores.mean(dim=-1)  # 对天数维度取平均
         
         # 计算阈值
-        if self.region_threshold is None:
-            self.region_threshold = self.calculate_adaptive_threshold(region_scores)
-        if self.time_threshold is None:
-            self.time_threshold = self.calculate_adaptive_threshold(time_scores)
+        region_threshold = torch.quantile(region_scores, 1 - self.contamination)
+        time_threshold = torch.quantile(time_scores.reshape(-1), 1 - self.contamination)
         
-        # 检测异常
-        region_anomalies = (region_scores > self.region_threshold)
-        time_anomalies = (time_scores > self.time_threshold)
-        
-        # 统计异常数量
-        n_region_anomalies = region_anomalies.sum().item()
-        n_time_anomalies = time_anomalies.sum().item()
-        
-        if self.verbose:
-            print(f"检测到的区域异常数量: {n_region_anomalies}")
-            print(f"检测到的时间异常数量: {n_time_anomalies}")
-            print(f"区域阈值: {self.region_threshold:.4f}")
-            print(f"时间阈值: {self.time_threshold:.4f}")
-        
-        # 如果异常数量太少，调整阈值
-        min_anomalies = int(region_scores.numel() * self.contamination * 0.1)
-        if n_region_anomalies < min_anomalies:
-            print(f"[WARNING] 区域异常数量过少 ({n_region_anomalies} < {min_anomalies})，调整阈值")
-            self.region_threshold = torch.quantile(region_scores, 1 - self.contamination * 2)
-            region_anomalies = (region_scores > self.region_threshold)
-        
-        if n_time_anomalies < min_anomalies:
-            print(f"[WARNING] 时间异常数量过少 ({n_time_anomalies} < {min_anomalies})，调整阈值")
-            self.time_threshold = torch.quantile(time_scores, 1 - self.contamination * 2)
-            time_anomalies = (time_scores > self.time_threshold)
-        
-        # 构建异常分数矩阵
-        n_regions = region_scores.shape[0]
-        n_times = time_scores.shape[1]
-        anomaly_scores = torch.zeros((n_regions, n_times, 2))
-        
-        # 使用广播机制填充分数矩阵
-        anomaly_scores[:, :, 0] = region_scores  # [N, T]
-        anomaly_scores[:, :, 1] = time_scores   # [N, T]
-        
-        # 记录异常事件
-        anomaly_events = []
-        for i in range(n_regions):
-            for t in range(n_times):
-                if region_anomalies[i].item() or time_anomalies[0, t].item():
-                    anomaly_events.append((i, t))
-        
-        if self.verbose:
-            print(f"最终检测到的异常事件数量: {len(anomaly_events)}")
+        # 标记异常
+        anomaly_events = torch.zeros_like(anomaly_scores, dtype=torch.bool)
+        anomaly_events[:, :, 0] = region_scores.unsqueeze(1).expand(-1, n_times) > region_threshold
+        anomaly_events[:, :, 1] = time_scores.mean(dim=-1) > time_threshold
         
         return anomaly_events, anomaly_scores
+
+    @torch.no_grad()
+    def decision_function(self, x, return_dict=False):
+        """计算异常分数"""
+        self.model.eval()
+        with torch.no_grad():
+            # 确保输入数据在正确的设备上
+            x = torch.tensor(x, dtype=torch.float).to(self.device)
+            
+            # 获取模型输出
+            region_scores, time_scores = self.model(x)
+            
+            # 添加数值稳定性检查
+            if torch.isnan(region_scores).any() or torch.isnan(time_scores).any():
+                print("[WARNING] 检测到NaN值，进行数值稳定性处理")
+                region_scores = torch.nan_to_num(region_scores, nan=0.0)
+                time_scores = torch.nan_to_num(time_scores, nan=0.0)
+            
+            # 确保分数在合理范围内
+            region_scores = torch.clamp(region_scores, min=0.0, max=10.0)
+            time_scores = torch.clamp(time_scores, min=0.0, max=10.0)
+            
+            # 检测异常
+            anomaly_events, anomaly_scores = self.detect_anomalies(region_scores, time_scores)
+            
+            if return_dict:
+                return {
+                    'region_scores': region_scores.cpu(),
+                    'time_scores': time_scores.cpu(),
+                    'anomaly_events': anomaly_events.cpu(),
+                    'anomaly_scores': anomaly_scores.cpu()
+                }
+            else:
+                return anomaly_scores.cpu()
 
     def evaluate(self, x, y_true):
         """评估模型性能"""
@@ -1391,99 +1310,69 @@ class STAnomalyFormerDetector_v4(STAnomalyFormerDetector_v3):
         return threshold
 
     def detect_anomalies(self, region_scores, time_scores):
-        region_scores = region_scores.detach().cpu()
-        time_scores = time_scores.detach().cpu()
+        """检测异常并返回异常事件和分数"""
+        # 确保输入张量的维度正确
+        if region_scores.dim() == 3:  # [263, 1, 1]
+            region_scores = region_scores.squeeze(-1).squeeze(-1)  # [263]
         
-        # 添加调试信息
-        if self.verbose:
-            print(f"[DEBUG] 检测异常:")
-            print(f"区域分数形状: {region_scores.shape}")
-            print(f"时间分数形状: {time_scores.shape}")
-            print(f"区域分数范围: [{region_scores.min():.4f}, {region_scores.max():.4f}]")
-            print(f"时间分数范围: [{time_scores.min():.4f}, {time_scores.max():.4f}]")
+        if time_scores.dim() == 4:  # [263, 23, 14, 1]
+            time_scores = time_scores.squeeze(-1)  # [263, 23, 14]
         
-        # 确保分数维度正确
-        if len(region_scores.shape) == 1:
-            region_scores = region_scores.unsqueeze(1)  # [N, 1]
-        if len(time_scores.shape) == 1:
-            time_scores = time_scores.unsqueeze(0)      # [1, T]
+        # 获取时间步数
+        n_times = time_scores.size(1)
+        
+        # 初始化异常分数张量
+        anomaly_scores = torch.zeros((region_scores.size(0), n_times, 2), device=region_scores.device)
+        
+        # 扩展区域得分到所有时间步
+        anomaly_scores[:, :, 0] = region_scores.unsqueeze(1).expand(-1, n_times)
+        
+        # 计算时间异常得分
+        anomaly_scores[:, :, 1] = time_scores.mean(dim=-1)  # 对天数维度取平均
         
         # 计算阈值
-        if self.region_threshold is None:
-            self.region_threshold = self.calculate_adaptive_threshold(region_scores)
-        if self.time_threshold is None:
-            self.time_threshold = self.calculate_adaptive_threshold(time_scores)
+        region_threshold = torch.quantile(region_scores, 1 - self.contamination)
+        time_threshold = torch.quantile(time_scores.reshape(-1), 1 - self.contamination)
         
-        # 检测异常
-        region_anomalies = (region_scores > self.region_threshold)
-        time_anomalies = (time_scores > self.time_threshold)
-        
-        # 统计异常数量
-        n_region_anomalies = region_anomalies.sum().item()
-        n_time_anomalies = time_anomalies.sum().item()
-        
-        if self.verbose:
-            print(f"检测到的区域异常数量: {n_region_anomalies}")
-            print(f"检测到的时间异常数量: {n_time_anomalies}")
-            print(f"区域阈值: {self.region_threshold:.4f}")
-            print(f"时间阈值: {self.time_threshold:.4f}")
-        
-        # 如果异常数量太少，调整阈值
-        min_anomalies = int(region_scores.numel() * self.contamination * 0.1)
-        if n_region_anomalies < min_anomalies:
-            print(f"[WARNING] 区域异常数量过少 ({n_region_anomalies} < {min_anomalies})，调整阈值")
-            self.region_threshold = torch.quantile(region_scores, 1 - self.contamination * 2)
-            region_anomalies = (region_scores > self.region_threshold)
-        
-        if n_time_anomalies < min_anomalies:
-            print(f"[WARNING] 时间异常数量过少 ({n_time_anomalies} < {min_anomalies})，调整阈值")
-            self.time_threshold = torch.quantile(time_scores, 1 - self.contamination * 2)
-            time_anomalies = (time_scores > self.time_threshold)
-        
-        # 构建异常分数矩阵
-        n_regions = region_scores.shape[0]
-        n_times = time_scores.shape[1]
-        anomaly_scores = torch.zeros((n_regions, n_times, 2))
-        
-        # 使用广播机制填充分数矩阵
-        anomaly_scores[:, :, 0] = region_scores  # [N, T]
-        anomaly_scores[:, :, 1] = time_scores   # [N, T]
-        
-        # 记录异常事件
-        anomaly_events = []
-        for i in range(n_regions):
-            for t in range(n_times):
-                if region_anomalies[i].item() or time_anomalies[0, t].item():
-                    anomaly_events.append((i, t))
-        
-        if self.verbose:
-            print(f"最终检测到的异常事件数量: {len(anomaly_events)}")
+        # 标记异常
+        anomaly_events = torch.zeros_like(anomaly_scores, dtype=torch.bool)
+        anomaly_events[:, :, 0] = region_scores.unsqueeze(1).expand(-1, n_times) > region_threshold
+        anomaly_events[:, :, 1] = time_scores.mean(dim=-1) > time_threshold
         
         return anomaly_events, anomaly_scores
 
     @torch.no_grad()
     def decision_function(self, x, return_dict=False):
         self.model.eval()
-        x = torch.tensor(x, dtype=torch.float).to(self.device)
-        
-        output_dict = self.model(x, return_dict=True)
-        
-        region_scores = output_dict['region_scores']
-        time_scores = output_dict['time_scores']
-        
-        anomaly_events, anomaly_scores = self.detect_anomalies(region_scores, time_scores)
-        
-        if return_dict:
-            return {
-                'anomaly_scores': anomaly_scores,
-                'region_scores': region_scores,
-                'time_scores': time_scores,
-                'anomaly_events': anomaly_events,
-                'region_threshold': self.region_threshold,
-                'time_threshold': self.time_threshold
-            }
-        else:
-            return anomaly_scores.cpu().numpy()
+        with torch.no_grad():
+            # 确保输入数据在正确的设备上
+            x = torch.tensor(x, dtype=torch.float).to(self.device)
+            
+            # 获取模型输出
+            z, time_scores, region_scores = self.model(x)
+            
+            # 添加数值稳定性检查
+            if torch.isnan(region_scores).any() or torch.isnan(time_scores).any():
+                print("[WARNING] 检测到NaN值，进行数值稳定性处理")
+                region_scores = torch.nan_to_num(region_scores, nan=0.0)
+                time_scores = torch.nan_to_num(time_scores, nan=0.0)
+            
+            # 确保分数在合理范围内
+            region_scores = torch.clamp(region_scores, min=0.0, max=10.0)
+            time_scores = torch.clamp(time_scores, min=0.0, max=10.0)
+            
+            # 检测异常
+            anomaly_events, anomaly_scores = self.detect_anomalies(region_scores, time_scores)
+            
+            if return_dict:
+                return {
+                    'region_scores': region_scores.cpu(),
+                    'time_scores': time_scores.cpu(),
+                    'anomaly_events': anomaly_events.cpu(),
+                    'anomaly_scores': anomaly_scores.cpu()
+                }
+            else:
+                return anomaly_scores.cpu()
 
     def evaluate(self, x, y_true):
         """评估模型性能"""
