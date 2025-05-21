@@ -80,9 +80,21 @@ class AnomalyInjector:
     def inject_space_anomaly(self, data, return_mask=False):
         """
         注入空间异常
-        Args:
+        
+        按照论文描述的方法实现：
+        1. 对节点v_n，从节点集合中随机采样k（取节点数的10%）个节点
+        2. 计算其与v_n的信号差异
+        3. 选择与v_n信号差异最大的节点v_i，将v_n的信号替换为v_i的信号
+        
+        公式：
+        X^(n) <- X^(i), i = argmax_{j in Random(N,k)} ||X^(n) - X^(k)||_2
+        
+        参数:
             data: 形状为 (n_nodes, n_patches, patch_len, n_features) 的数据
             return_mask: 是否返回异常掩码
+            
+        返回:
+            注入异常后的数据和可选的异常掩码
         """
         n_nodes, n_patches, patch_len, n_features = data.shape
         injected_data = data.copy()
@@ -94,31 +106,35 @@ class AnomalyInjector:
         n_anomaly_nodes = int(n_nodes * self.space_anomaly_ratio)
         anomaly_nodes = np.random.choice(n_nodes, n_anomaly_nodes, replace=False)
         
-        # 为每个异常节点找到最不同的邻居
+        # 创建异常掩码
+        anomaly_mask = np.zeros((n_nodes, n_patches), dtype=bool)
+        
+        # 对每个异常节点注入空间异常
         for node in anomaly_nodes:
-            # 计算当前节点与所有其他节点的差异
+            # 1. 从节点集合中随机采样k个节点
+            other_nodes = np.arange(n_nodes) != node
+            available_nodes = np.where(other_nodes)[0]
+            k = min(self.k_neighbors, len(available_nodes))
+            sampled_nodes = np.random.choice(available_nodes, k, replace=False)
+            
+            # 2. 计算当前节点与采样节点的信号差异
             node_mean = patch_means[node]  # [n_features]
-            other_means = patch_means[np.arange(n_nodes) != node]  # [n_nodes-1, n_features]
+            sampled_means = patch_means[sampled_nodes]  # [k, n_features]
             
             # 计算L2距离
-            distances = np.linalg.norm(other_means - node_mean, axis=1)  # [n_nodes-1]
+            distances = np.linalg.norm(sampled_means - node_mean, axis=1)  # [k]
             
-            # 选择k个最不同的邻居
-            k = min(self.k_neighbors, len(distances))
-            top_k_idx = np.argpartition(distances, -k)[-k:]
-            max_diff_idx = top_k_idx[np.argmax(distances[top_k_idx])]
+            # 3. 选择信号差异最大的节点
+            max_diff_idx = np.argmax(distances)
+            max_diff_neighbor = sampled_nodes[max_diff_idx]
             
-            # 获取最不同邻居的索引（需要调整，因为other_means排除了当前节点）
-            other_nodes = np.arange(n_nodes) != node
-            max_diff_neighbor = np.where(other_nodes)[0][max_diff_idx]
-            
-            # 用邻居的数据替换当前节点的数据
+            # 4. 用最不同邻居的数据替换当前节点的数据
             injected_data[node] = data[max_diff_neighbor]
+            
+            # 更新异常掩码
+            anomaly_mask[node] = True
         
         if return_mask:
-            # 创建异常掩码
-            anomaly_mask = np.zeros((n_nodes, n_patches), dtype=bool)
-            anomaly_mask[anomaly_nodes] = True
             return injected_data, anomaly_mask
         
         return injected_data
@@ -132,6 +148,17 @@ class AnomalyInjector:
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         同时注入时间异常和空间异常
+        
+        时间异常注入：
+        对选中的节点v_n，将其交通信号X^(n)限制为：
+        X^(n) <- min(X^(n), μ * max(X^(n)))
+        其中μ为时间异常阈值参数
+        
+        空间异常注入：
+        对选中的节点v_n：
+        1. 随机采样k个节点
+        2. 选择信号差异最大的节点v_i
+        3. 将v_n的信号替换为v_i的信号
         
         参数:
             data: 输入数据，形状为 [n_nodes, n_patches, patch_len, n_features]
