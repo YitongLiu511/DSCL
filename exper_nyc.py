@@ -4,6 +4,7 @@ from STAnomalyFormer.interface.utils import recall_k
 from data.load_nyc import load_dataset
 import torch
 from sklearn.metrics import roc_auc_score
+from data.anomaly_injection import AnomalyInjector
 
 import argparse
 from tqdm import tqdm
@@ -42,6 +43,8 @@ parser.add_argument('--static_only', action='store_true')
 parser.add_argument('--early_stopping', action='store_true')
 parser.add_argument('--temperature', type=float, default=50.0)
 parser.add_argument('--anormly_ratio', type=float, default=0.1)
+parser.add_argument('--time_threshold', type=float, default=0.7, help='时间异常注入的阈值μ')
+parser.add_argument('--k_neighbors', type=int, default=None, help='空间异常注入时采样的邻居节点数')
 
 parser.add_argument('--cuda', action='store_true', default=True)  # 默认使用GPU
 
@@ -135,9 +138,104 @@ print(f"标签y_reshaped形状: {y_reshaped.shape}")
 print(f"验证集形状: {val_X.shape}")
 print(f"测试集形状: {test_X.shape}")
 
+# 计算分片数量
+n_patches = (test_X.shape[1] - args.patch_len) // args.stride + 1
+print(f"\n分片信息:")
+print(f"时间序列长度: {test_X.shape[1]}")
+print(f"Patch大小: {args.patch_len}")
+print(f"步长: {args.stride}")
+print(f"分片数量: {n_patches}")
+
+# 创建异常注入器
+injector = AnomalyInjector(
+    n_nodes=X.shape[0],  # 263个节点
+    n_timesteps=n_patches,  # 使用实际的分片数量
+    time_anomaly_ratio=args.anormly_ratio * 0.5,  # 降低时间异常比例
+    space_anomaly_ratio=args.anormly_ratio * 0.5,  # 降低空间异常比例
+    time_threshold=args.time_threshold,
+    k_neighbors=args.k_neighbors,
+    seed=args.seed
+)
+
 for t in range(args.repeat):
     print("{}-th experiment:".format(t + 1))
 
+    # 对测试数据进行分片
+    test_X_patched = np.zeros((test_X.shape[0], n_patches, args.patch_len, test_X.shape[2]))
+    for i in range(n_patches):
+        start_idx = i * args.stride
+        test_X_patched[:, i] = test_X[:, start_idx:start_idx + args.patch_len]
+
+    # 注入异常并获取异常掩码
+    test_X_patched_injected, anomaly_mask = injector.inject_anomalies(
+        test_X_patched,
+        inject_time=True,
+        inject_space=True,
+        return_mask=True
+    )
+
+    # 将分片后的数据还原回原始时间序列
+    test_X_injected = np.zeros_like(test_X)
+    for i in range(n_patches):
+        start_idx = i * args.stride
+        test_X_injected[:, start_idx:start_idx + args.patch_len] = test_X_patched_injected[:, i]
+
+    # 创建标签
+    y_reshaped = np.zeros((263, 144, 14, 2), dtype=bool)
+    
+    # 将异常掩码还原到原始时间序列
+    anomaly_mask_full = np.zeros((263, 144, 14), dtype=bool)
+    for i in range(n_patches):
+        start_idx = i * args.stride
+        # 打印每一步的维度信息
+        print(f"\n处理第 {i} 个patch:")
+        print(f"1. anomaly_mask[:, i] shape: {anomaly_mask[:, i].shape}")
+        
+        # 将每个patch的异常掩码压缩到节点级别
+        patch_mask = np.any(anomaly_mask[:, i], axis=(1, 2))  # [263]
+        print(f"2. patch_mask shape: {patch_mask.shape}")
+        
+        # 扩展到正确的维度
+        expanded_mask = np.tile(patch_mask[:, np.newaxis], (1, 14))  # [263, 14]
+        print(f"3. expanded_mask shape: {expanded_mask.shape}")
+        
+        # 对每个patch的时间段进行赋值
+        for j in range(args.patch_len):
+            anomaly_mask_full[:, start_idx + j] = expanded_mask
+    
+    # 打印最终的维度信息
+    print("\n最终维度信息:")
+    print(f"原始异常掩码形状: {anomaly_mask.shape}")
+    print(f"还原后的掩码形状: {anomaly_mask_full.shape}")
+    print(f"目标标签形状: {y_reshaped.shape}")
+    
+    # 时间异常标签（第一维）
+    y_reshaped[:, :, :, 0] = anomaly_mask_full
+    # 空间异常标签（第二维）
+    y_reshaped[:, :, :, 1] = anomaly_mask_full
+
+    # 打印异常注入统计信息
+    print("\n异常注入统计:")
+    time_anomaly_nodes = np.sum(np.any(anomaly_mask_full, axis=(1, 2)))
+    space_anomaly_nodes = np.sum(np.any(anomaly_mask_full, axis=(0, 2)))
+    total_anomalies = np.sum(anomaly_mask_full)
+    anomaly_ratio = np.mean(anomaly_mask_full) * 100
+    
+    print(f"时间异常节点数: {time_anomaly_nodes}")
+    print(f"空间异常节点数: {space_anomaly_nodes}")
+    print(f"总异常样本数: {total_anomalies}")
+    print(f"异常比例: {anomaly_ratio:.2f}%")
+    print(f"预期异常比例: {args.anormly_ratio * 100:.2f}%")
+
+    # 确保输入数据和标签的维度匹配
+    print("\n维度检查:")
+    print(f"原始数据X形状: {X.shape}")
+    print(f"注入异常后的测试数据形状: {test_X_injected.shape}")
+    print(f"标签y_reshaped形状: {y_reshaped.shape}")
+    print(f"验证集形状: {val_X.shape}")
+    print(f"测试集形状: {test_X.shape}")
+
+    # 创建模型实例
     model = STAnomalyFormerDetector_v4(
         d_in=X.shape[2],
         d_model=args.d_model,
@@ -150,17 +248,12 @@ for t in range(args.repeat):
         lr=args.lr,
         verbose=args.verbose,
         contamination=args.anormly_ratio,
+        patch_len=args.patch_len,  # 添加patch_len参数
+        stride=args.stride,        # 添加stride参数
     ).fit(X, torch.stack([torch.tensor(1 - adj), torch.tensor(dist), torch.tensor(poi_sim)]), (val_X, y_reshaped))
     
-    # 打印 model 的 __dict__ 以及 model.decision_function 的 __dict__，以查看 model 内部状态
-    print("model.__dict__:", model.__dict__)
-    print("model.decision_function.__dict__:", model.decision_function.__dict__)
-    
-    # 打印 model.decision_function 的返回值，以确认返回字典中键名
-    print("model.decision_function 返回字典的键名:", model.decision_function(test_X, return_dict=True).keys())
-    
-    # 获取异常检测结果
-    output_dict = model.decision_function(test_X, return_dict=True)
+    # 使用注入异常后的测试数据进行评估
+    output_dict = model.decision_function(test_X_injected, return_dict=True)
     
     # 获取异常分数和预测
     anomaly_scores = output_dict['anomaly_scores']  # [N, T, 2]
@@ -168,76 +261,56 @@ for t in range(args.repeat):
     time_scores = anomaly_scores[:, :, 1]          # [N, T]
     
     # 将分数转换为与标签相同的维度
-    # 由于模型输出是12个时间步，我们需要将分数扩展到144个时间步
     region_scores_full = np.zeros((263, 144))
     time_scores_full = np.zeros((263, 144))
     
-    # 将12个时间步的分数复制到对应的144个时间步
-    for i in range(12):
-        region_scores_full[:, i*12:(i+1)*12] = region_scores[:, i:i+1]
-        time_scores_full[:, i*12:(i+1)*12] = time_scores[:, i:i+1]
+    # 使用最近邻插值将分数扩展到144个时间步
+    for i in range(263):
+        region_scores_full[i] = np.interp(
+            np.arange(144),
+            np.linspace(0, 143, region_scores.shape[1]),
+            region_scores[i].cpu().numpy()
+        )
+        time_scores_full[i] = np.interp(
+            np.arange(144),
+            np.linspace(0, 143, time_scores.shape[1]),
+            time_scores[i].cpu().numpy()
+        )
     
-    # 计算区域异常评估指标
-    try:
-        region_auc = roc_auc_score(y_reshaped[:, :, 0, 0].flatten(), region_scores_full.flatten())
-    except ValueError as e:
-        print(f"警告：区域异常评估出错 - {str(e)}")
-        region_auc = 0.0
+    # 计算评估指标
+    metrics = model.evaluate(test_X_injected, y_reshaped)
     
-    # 计算时间异常评估指标
-    try:
-        time_auc = roc_auc_score(y_reshaped[:, :, 0, 1].flatten(), time_scores_full.flatten())
-    except ValueError as e:
-        print(f"警告：时间异常评估出错 - {str(e)}")
-        time_auc = 0.0
+    # 保存结果
+    results = {
+        'region_auc': metrics['region_auc'],
+        'time_auc': metrics['time_auc'],
+        'combined_auc': metrics['combined_auc'],
+        'region_scores': region_scores_full,
+        'time_scores': time_scores_full,
+        'anomaly_mask': anomaly_mask_full
+    }
     
-    # 计算综合评估指标
-    try:
-        combined_scores = np.stack([region_scores_full, time_scores_full], axis=-1)
-        combined_auc = roc_auc_score(y_reshaped[:, :, 0, :].flatten(), combined_scores.flatten())
-    except ValueError as e:
-        print(f"警告：综合评估出错 - {str(e)}")
-        combined_auc = 0.0
+    # 保存结果到文件
+    np.save(f'results/experiment_{t+1}.npy', results)
     
-    # 计算区域异常的recall@k
-    k1 = np.ceil(263 // 10).astype(int)
-    k2 = np.ceil(263 // 5).astype(int)
-    # 对每个区域取平均分数
-    region_scores_mean = np.mean(region_scores_full, axis=1)
-    region_recall_k1 = recall_k(y_reshaped[:, 0, 0, 0], region_scores_mean, k1)
-    region_recall_k2 = recall_k(y_reshaped[:, 0, 0, 0], region_scores_mean, k2)
+    print(f"\nExperiment {t+1} results:")
+    print(f"Region AUC: {metrics['region_auc']:.3f}")
+    print(f"Time AUC: {metrics['time_auc']:.3f}")
+    print(f"Combined AUC: {metrics['combined_auc']:.3f}")
     
-    # 计算时间异常的recall@k
-    k1 = np.ceil(144 // 10).astype(int)
-    k2 = np.ceil(144 // 5).astype(int)
-    # 对每个时间步取平均分数
-    time_scores_mean = np.mean(time_scores_full, axis=0)
-    time_recall_k1 = recall_k(y_reshaped[0, :, 0, 1], time_scores_mean, k1)
-    time_recall_k2 = recall_k(y_reshaped[0, :, 0, 1], time_scores_mean, k2)
-    
+    # 更新score_list
     score_list.append([
-        region_recall_k1, region_recall_k2, region_auc,  # 区域异常指标
-        time_recall_k1, time_recall_k2, time_auc,        # 时间异常指标
-        combined_auc                                     # 综合指标
+        metrics['region_auc'],
+        metrics['time_auc'],
+        metrics['combined_auc']
     ])
-    
-    # 打印异常检测结果
-    print("\n异常检测结果:")
-    print(f"区域异常分数范围: [{region_scores_mean.min():.4f}, {region_scores_mean.max():.4f}]")
-    print(f"时间异常分数范围: [{time_scores_mean.min():.4f}, {time_scores_mean.max():.4f}]")
-    print(f"区域异常标签: {region_scores_mean > 0}")
-    print(f"时间异常标签: {time_scores_mean > 0}")
-    print("\n评估指标:")
-    print(f"区域异常 - Recall@k1: {region_recall_k1:.4f}, Recall@k2: {region_recall_k2:.4f}, AUC: {region_auc:.4f}")
-    print(f"时间异常 - Recall@k1: {time_recall_k1:.4f}, Recall@k2: {time_recall_k2:.4f}, AUC: {time_auc:.4f}")
-    print(f"综合指标 - AUC: {combined_auc:.4f}")
 
 # 计算平均指标
 mean_scores = np.array(score_list).mean(0)
 print("\n平均评估指标:")
-print(f"区域异常 - Recall@k1: {mean_scores[0]:.4f}, Recall@k2: {mean_scores[1]:.4f}, AUC: {mean_scores[2]:.4f}")
-print(f"时间异常 - Recall@k1: {mean_scores[3]:.4f}, Recall@k2: {mean_scores[4]:.4f}, AUC: {mean_scores[5]:.4f}")
-print(f"综合指标 - AUC: {mean_scores[6]:.4f}")
+print(f"区域异常 AUC: {mean_scores[0]:.4f}")
+print(f"时间异常 AUC: {mean_scores[1]:.4f}")
+print(f"综合 AUC: {mean_scores[2]:.4f}")
 
 with open('test.txt', 'a+') as f:
     f.write(str(list(mean_scores)) + '\n')
