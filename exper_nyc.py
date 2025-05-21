@@ -1,10 +1,11 @@
 import numpy as np
-from STAnomalyFormer.interface.estimator import STAnomalyFormerDetector_v4, TemporalTSFMDetector
 from STAnomalyFormer.interface.utils import recall_k
 from data.load_nyc import load_dataset
 import torch
 from sklearn.metrics import roc_auc_score
 from data.anomaly_injection import AnomalyInjector
+from STAnomalyFormer.model.patch import STPatchMaskFormer
+import torch.nn as nn
 
 import argparse
 from tqdm import tqdm
@@ -47,6 +48,10 @@ parser.add_argument('--time_threshold', type=float, default=0.7, help='时间异
 parser.add_argument('--k_neighbors', type=int, default=None, help='空间异常注入时采样的邻居节点数')
 
 parser.add_argument('--cuda', action='store_true', default=True)  # 默认使用GPU
+
+# 掩码相关参数
+parser.add_argument('--time_ratio', type=float, default=0.5, help='时间掩码比例')
+parser.add_argument('--freq_ratio', type=float, default=0.4, help='频域掩码比例')
 
 args = parser.parse_args()
 print("\n实验参数设置:")
@@ -160,6 +165,10 @@ injector = AnomalyInjector(
 for t in range(args.repeat):
     print("{}-th experiment:".format(t + 1))
 
+    # 确保test_X是NumPy数组
+    if isinstance(test_X, torch.Tensor):
+        test_X = test_X.cpu().numpy()
+    
     # 对测试数据进行分片
     test_X_patched = np.zeros((test_X.shape[0], n_patches, args.patch_len, test_X.shape[2]))
     for i in range(n_patches):
@@ -235,74 +244,156 @@ for t in range(args.repeat):
     print(f"验证集形状: {val_X.shape}")
     print(f"测试集形状: {test_X.shape}")
 
-    # 创建模型实例
-    model = STAnomalyFormerDetector_v4(
-        d_in=X.shape[2],
+    # 将numpy数组转换为PyTorch张量
+    if isinstance(X, torch.Tensor):
+        X = X.cpu().numpy()
+    if isinstance(val_X, torch.Tensor):
+        val_X = val_X.cpu().numpy()
+    if isinstance(test_X, torch.Tensor):
+        test_X = test_X.cpu().numpy()
+    if isinstance(test_X_injected, torch.Tensor):
+        test_X_injected = test_X_injected.cpu().numpy()
+    if isinstance(y_reshaped, torch.Tensor):
+        y_reshaped = y_reshaped.cpu().numpy()
+
+    X = torch.FloatTensor(X)
+    val_X = torch.FloatTensor(val_X)
+    test_X = torch.FloatTensor(test_X)
+    test_X_injected = torch.FloatTensor(test_X_injected)
+    y_reshaped = torch.FloatTensor(y_reshaped)
+
+    # 初始化模型
+    model = STPatchMaskFormer(
+        c_in=X.shape[2],
+        seq_len=X.shape[1],
+        patch_len=args.patch_len,
+        stride=args.stride,
+        max_seq_len=X.shape[1],
+        n_layers=args.n_gcn,
         d_model=args.d_model,
-        dim_k=args.d_model // args.n_heads,
-        dim_v=args.d_model // args.n_heads,
         n_heads=args.n_heads,
-        n_gcn=args.n_gcn,
-        device='cuda' if args.cuda else 'cpu',
-        epoch=args.epochs,
-        lr=args.lr,
-        verbose=args.verbose,
-        contamination=args.anormly_ratio,
-        patch_len=args.patch_len,  # 添加patch_len参数
-        stride=args.stride,        # 添加stride参数
-    ).fit(X, torch.stack([torch.tensor(1 - adj), torch.tensor(dist), torch.tensor(poi_sim)]), (val_X, y_reshaped))
-    
+        d_ff=args.d_model,
+        shared_embedding=True,
+        attn_dropout=0.1,
+        dropout=0.1,
+        act='gelu',
+        mask_ratio=args.mask_ratio,
+        time_ratio=args.time_ratio,
+        freq_ratio=args.freq_ratio,
+        patch_size=args.patch_len,
+    )
+
+    # 训练模型
+    model = model.to('cuda' if args.cuda else 'cpu')
+    X = X.to('cuda' if args.cuda else 'cpu')
+    val_X = val_X.to('cuda' if args.cuda else 'cpu')
+    test_X = test_X.to('cuda' if args.cuda else 'cpu')
+    test_X_injected = test_X_injected.to('cuda' if args.cuda else 'cpu')
+    y_reshaped = y_reshaped.to('cuda' if args.cuda else 'cpu')
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    criterion = nn.MSELoss()
+
+    # 训练循环
+    for epoch in range(args.epochs):
+        model.train()
+        optimizer.zero_grad()
+        
+        # 前向传播
+        output = model(X)
+        
+        # 计算重建损失
+        loss = criterion(output, X)
+        
+        # 反向传播
+        loss.backward()
+        optimizer.step()
+        
+        if args.verbose and epoch % 10 == 0:
+            print(f'Epoch {epoch}: Loss = {loss.item():.4f}')
+
     # 使用注入异常后的测试数据进行评估
-    output_dict = model.decision_function(test_X_injected, return_dict=True)
-    
-    # 获取异常分数和预测
-    anomaly_scores = output_dict['anomaly_scores']  # [N, T, 2]
-    region_scores = anomaly_scores[:, :, 0]        # [N, T]
-    time_scores = anomaly_scores[:, :, 1]          # [N, T]
-    
-    # 将分数转换为与标签相同的维度
-    region_scores_full = np.zeros((263, 144))
-    time_scores_full = np.zeros((263, 144))
-    
-    # 使用最近邻插值将分数扩展到144个时间步
-    for i in range(263):
-        region_scores_full[i] = np.interp(
-            np.arange(144),
-            np.linspace(0, 143, region_scores.shape[1]),
-            region_scores[i].cpu().numpy()
-        )
-        time_scores_full[i] = np.interp(
-            np.arange(144),
-            np.linspace(0, 143, time_scores.shape[1]),
-            time_scores[i].cpu().numpy()
-        )
-    
-    # 计算评估指标
-    metrics = model.evaluate(test_X_injected, y_reshaped)
-    
+    model.eval()
+    with torch.no_grad():
+        output_dict = model(test_X_injected, return_dict=True)
+        
+        # 获取异常分数和预测
+        anomaly_scores = output_dict['anomaly_scores']  # [N, T, 2]
+        region_scores = anomaly_scores[:, :, 0]        # [N, T]
+        time_scores = anomaly_scores[:, :, 1]          # [N, T]
+        
+        print("\n评估阶段维度追踪:")
+        print(f"1. anomaly_scores维度: {anomaly_scores.shape}")
+        print(f"2. region_scores维度: {region_scores.shape}")
+        print(f"3. time_scores维度: {time_scores.shape}")
+        
+        # 将分数转换为与标签相同的维度
+        region_scores_full = np.zeros((263, 144))
+        time_scores_full = np.zeros((263, 144))
+        
+        # 确保分数是2D数组
+        region_scores = region_scores.cpu().numpy()  # [263, T]
+        time_scores = time_scores.cpu().numpy()      # [263, T]
+        
+        print(f"4. region_scores转换后维度: {region_scores.shape}")
+        print(f"5. time_scores转换后维度: {time_scores.shape}")
+        
+        # 使用最近邻插值将分数扩展到144个时间步
+        for i in range(263):
+            try:
+                # 获取当前区域的时间序列
+                region_series = region_scores[i]  # [T]
+                time_series = time_scores[i]      # [T]
+                
+                # 确保是一维数组
+                if len(region_series.shape) > 1:
+                    region_series = region_series[:, 0]  # 取第一个通道
+                if len(time_series.shape) > 1:
+                    time_series = time_series[:, 0]  # 取第一个通道
+                
+                # 创建插值点
+                x_old = np.linspace(0, 143, len(region_series))
+                x_new = np.arange(144)
+                
+                # 执行插值
+                region_scores_full[i] = np.interp(x_new, x_old, region_series)
+                time_scores_full[i] = np.interp(x_new, x_old, time_series)
+                
+            except Exception as e:
+                print(f"处理第{i}个样本时出错:")
+                print(f"region_series形状: {region_series.shape}")
+                print(f"time_series形状: {time_series.shape}")
+                print(f"x_old形状: {x_old.shape}")
+                print(f"x_new形状: {x_new.shape}")
+                raise e
+        
+        print(f"6. region_scores_full维度: {region_scores_full.shape}")
+        print(f"7. time_scores_full维度: {time_scores_full.shape}")
+        
+        # 计算评估指标
+        metrics = model.evaluate(test_X_injected, y_reshaped)
+
     # 保存结果
     results = {
         'region_auc': metrics['region_auc'],
         'time_auc': metrics['time_auc'],
-        'combined_auc': metrics['combined_auc'],
         'region_scores': region_scores_full,
         'time_scores': time_scores_full,
         'anomaly_mask': anomaly_mask_full
     }
-    
+
     # 保存结果到文件
     np.save(f'results/experiment_{t+1}.npy', results)
-    
-    print(f"\nExperiment {t+1} results:")
-    print(f"Region AUC: {metrics['region_auc']:.3f}")
-    print(f"Time AUC: {metrics['time_auc']:.3f}")
-    print(f"Combined AUC: {metrics['combined_auc']:.3f}")
-    
+
+    # 打印评估结果
+    print(f"\n评估结果:")
+    print(f"区域异常AUC: {metrics['region_auc']:.4f}")
+    print(f"时间异常AUC: {metrics['time_auc']:.4f}")
+
     # 更新score_list
     score_list.append([
         metrics['region_auc'],
-        metrics['time_auc'],
-        metrics['combined_auc']
+        metrics['time_auc']
     ])
 
 # 计算平均指标
@@ -310,7 +401,6 @@ mean_scores = np.array(score_list).mean(0)
 print("\n平均评估指标:")
 print(f"区域异常 AUC: {mean_scores[0]:.4f}")
 print(f"时间异常 AUC: {mean_scores[1]:.4f}")
-print(f"综合 AUC: {mean_scores[2]:.4f}")
 
 with open('test.txt', 'a+') as f:
     f.write(str(list(mean_scores)) + '\n')
