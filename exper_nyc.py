@@ -118,8 +118,8 @@ y_reshaped[:, :, :, 1] = (time_anomaly_ratio > time_threshold)[np.newaxis, :, np
 # 打印调整后的标签信息
 print("\n调整后的标签分布:")
 print(f"区域异常标签:")
-print(f"- 异常区域数: {np.sum(y_reshaped[0, 0, :, 0] == 1)} (预期: {expected_region_anomalies})")
-print(f"- 异常区域比例: {np.sum(y_reshaped[0, 0, :, 0] == 1) / 263 * 100:.2f}%")
+print(f"- 异常区域数: {np.sum(y_reshaped[:, 0, 0, 0] == 1)} (预期: {expected_region_anomalies})")
+print(f"- 异常区域比例: {np.sum(y_reshaped[:, 0, 0, 0] == 1) / 263 * 100:.2f}%")
 print(f"时间异常标签:")
 print(f"- 异常时间槽数: {np.sum(y_reshaped[0, :, 0, 1] == 1)} (预期: {expected_time_anomalies})")
 print(f"- 异常时间槽比例: {np.sum(y_reshaped[0, :, 0, 1] == 1) / 144 * 100:.2f}%")
@@ -127,17 +127,6 @@ print(f"标签形状: {y_reshaped.shape}")
 print(f"总异常样本数: {np.sum(y_reshaped == 1)}")
 print(f"总正常样本数: {np.sum(y_reshaped == 0)}")
 print(f"总体异常比例: {np.mean(y_reshaped == 1) * 100:.2f}%")
-
-# 打印每个维度的异常分布
-print("\n异常分布详情:")
-print("区域异常分布:")
-region_anomalies = np.sum(y_reshaped[0, 0, :, 0] == 1)
-print(f"- 异常区域数量: {region_anomalies}")
-print(f"- 异常区域比例: {region_anomalies/263*100:.2f}%")
-print("时间异常分布:")
-time_anomalies = np.sum(y_reshaped[0, :, 0, 1] == 1)
-print(f"- 异常时间槽数量: {time_anomalies}")
-print(f"- 异常时间槽比例: {time_anomalies/144*100:.2f}%")
 
 # 确保输入数据和标签的维度匹配
 print("\n维度检查:")
