@@ -167,23 +167,34 @@ for t in range(args.repeat):
     region_scores = anomaly_scores[:, :, 0]        # [N, T]
     time_scores = anomaly_scores[:, :, 1]          # [N, T]
     
+    # 将分数转换为与标签相同的维度
+    # 由于模型输出是12个时间步，我们需要将分数扩展到144个时间步
+    region_scores_full = np.zeros((263, 144))
+    time_scores_full = np.zeros((263, 144))
+    
+    # 将12个时间步的分数复制到对应的144个时间步
+    for i in range(12):
+        region_scores_full[:, i*12:(i+1)*12] = region_scores[:, i:i+1]
+        time_scores_full[:, i*12:(i+1)*12] = time_scores[:, i:i+1]
+    
     # 计算区域异常评估指标
     try:
-        region_auc = roc_auc_score(y_reshaped[:, :, 0, 0].flatten(), region_scores.cpu().numpy().flatten())
+        region_auc = roc_auc_score(y_reshaped[:, :, 0, 0].flatten(), region_scores_full.flatten())
     except ValueError as e:
         print(f"警告：区域异常评估出错 - {str(e)}")
         region_auc = 0.0
     
     # 计算时间异常评估指标
     try:
-        time_auc = roc_auc_score(y_reshaped[:, :, 0, 1].flatten(), time_scores.cpu().numpy().flatten())
+        time_auc = roc_auc_score(y_reshaped[:, :, 0, 1].flatten(), time_scores_full.flatten())
     except ValueError as e:
         print(f"警告：时间异常评估出错 - {str(e)}")
         time_auc = 0.0
     
     # 计算综合评估指标
     try:
-        combined_auc = roc_auc_score(y_reshaped[:, :, 0, :].flatten(), anomaly_scores.cpu().numpy().flatten())
+        combined_scores = np.stack([region_scores_full, time_scores_full], axis=-1)
+        combined_auc = roc_auc_score(y_reshaped[:, :, 0, :].flatten(), combined_scores.flatten())
     except ValueError as e:
         print(f"警告：综合评估出错 - {str(e)}")
         combined_auc = 0.0
@@ -191,14 +202,18 @@ for t in range(args.repeat):
     # 计算区域异常的recall@k
     k1 = np.ceil(263 // 10).astype(int)
     k2 = np.ceil(263 // 5).astype(int)
-    region_recall_k1 = recall_k(y_reshaped[:, 0, 0, 0], region_scores.cpu().numpy().flatten(), k1)
-    region_recall_k2 = recall_k(y_reshaped[:, 0, 0, 0], region_scores.cpu().numpy().flatten(), k2)
+    # 对每个区域取平均分数
+    region_scores_mean = np.mean(region_scores_full, axis=1)
+    region_recall_k1 = recall_k(y_reshaped[:, 0, 0, 0], region_scores_mean, k1)
+    region_recall_k2 = recall_k(y_reshaped[:, 0, 0, 0], region_scores_mean, k2)
     
     # 计算时间异常的recall@k
     k1 = np.ceil(144 // 10).astype(int)
     k2 = np.ceil(144 // 5).astype(int)
-    time_recall_k1 = recall_k(y_reshaped[0, 0, 0, 1], time_scores.cpu().numpy().flatten(), k1)
-    time_recall_k2 = recall_k(y_reshaped[0, 0, 0, 1], time_scores.cpu().numpy().flatten(), k2)
+    # 对每个时间步取平均分数
+    time_scores_mean = np.mean(time_scores_full, axis=0)
+    time_recall_k1 = recall_k(y_reshaped[0, :, 0, 1], time_scores_mean, k1)
+    time_recall_k2 = recall_k(y_reshaped[0, :, 0, 1], time_scores_mean, k2)
     
     score_list.append([
         region_recall_k1, region_recall_k2, region_auc,  # 区域异常指标
@@ -208,10 +223,10 @@ for t in range(args.repeat):
     
     # 打印异常检测结果
     print("\n异常检测结果:")
-    print(f"区域异常分数: {region_scores}")
-    print(f"时间异常分数: {time_scores}")
-    print(f"区域异常标签: {region_scores.cpu().numpy().flatten() > 0}")
-    print(f"时间异常标签: {time_scores.cpu().numpy().flatten() > 0}")
+    print(f"区域异常分数范围: [{region_scores_mean.min():.4f}, {region_scores_mean.max():.4f}]")
+    print(f"时间异常分数范围: [{time_scores_mean.min():.4f}, {time_scores_mean.max():.4f}]")
+    print(f"区域异常标签: {region_scores_mean > 0}")
+    print(f"时间异常标签: {time_scores_mean > 0}")
     print("\n评估指标:")
     print(f"区域异常 - Recall@k1: {region_recall_k1:.4f}, Recall@k2: {region_recall_k2:.4f}, AUC: {region_auc:.4f}")
     print(f"时间异常 - Recall@k1: {time_recall_k1:.4f}, Recall@k2: {time_recall_k2:.4f}, AUC: {time_auc:.4f}")
