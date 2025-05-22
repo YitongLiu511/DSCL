@@ -842,7 +842,7 @@ class STPatchMaskFormer(STPatchFormer):
             }
         
         return z
-        
+
     def evaluate(self, x, y_true):
         """
         评估模型性能
@@ -919,9 +919,9 @@ class STPatchMaskFormer(STPatchFormer):
                 print(f"\n7. AUC分数:")
                 print(f"   region_auc: {region_auc:.4f}")
                 print(f"   time_auc: {time_auc:.4f}")
-            
-            return {
-                'region_auc': region_auc,
+                
+                return {
+                    'region_auc': region_auc,
                     'time_auc': time_auc
                 }
             except Exception as e:
