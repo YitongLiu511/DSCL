@@ -268,28 +268,94 @@ class TimeFreqMasking(nn.Module):
         bs, num_patch, n_vars, patch_len = x.shape
         device = x.device
         
+        print(f"\n时间掩码处理维度追踪:")
+        print(f"1. 输入维度: {x.shape}")
+        
         # 计算每个patch的变异系数
         cv = torch.std(x, dim=3) / (torch.mean(x, dim=3) + 1e-6)  # [bs, num_patch, n_vars]
+        print(f"2. 变异系数维度: {cv.shape}")
         
         # 对每个变量选择变异系数最大的patch进行掩码
-        mask = torch.ones_like(x, dtype=torch.bool, device=device)
+        patch_mask = torch.ones((bs, num_patch, n_vars), dtype=torch.bool, device=device)  # [bs, num_patch, n_vars]
         num_masks = int(num_patch * self.time_ratio)
+        print(f"3. 掩码数量: {num_masks}")
         
         # 获取变异系数最大的patch索引
         _, mask_idx = torch.topk(cv, k=num_masks, dim=1)  # [bs, num_masks, n_vars]
+        print(f"4. 掩码索引维度: {mask_idx.shape}")
         
         # 应用掩码
         for i in range(bs):
             for j in range(n_vars):
                 for k in range(num_masks):
                     if mask_idx[i,k,j] < num_patch:  # 确保索引在有效范围内
-                        mask[i, mask_idx[i,k,j], j, :] = 0
+                        patch_mask[i, mask_idx[i,k,j], j] = 0
         
-        # 使用可学习的掩码token替换被掩码的位置
-        x_masked = x.clone()
-        x_masked[~mask] = self.time_mask_token
+        print(f"5. 掩码矩阵维度: {patch_mask.shape}")
+        print(f"5.1 掩码矩阵中True的数量: {patch_mask.sum().item()}")
+        print(f"5.2 掩码矩阵中False的数量: {(~patch_mask).sum().item()}")
         
-        return x_masked, mask
+        # 分离掩码和未掩码的token
+        unmasked_tokens = x[patch_mask]  # [num_unmasked, patch_len]
+        masked_tokens = self.time_mask_token.repeat(bs, num_masks, n_vars, 1)
+        print(f"6. 未掩码token维度: {unmasked_tokens.shape}")
+        print(f"7. 掩码token维度: {masked_tokens.shape}")
+        
+        # 重塑未掩码的token以适应编码器
+        num_unmasked = unmasked_tokens.shape[0]
+        unmasked_tokens = unmasked_tokens.reshape(-1, 1, patch_len)  # [num_unmasked, 1, patch_len]
+        print(f"8. 重塑后未掩码token维度: {unmasked_tokens.shape}")
+        
+        # 投影到模型维度
+        unmasked_tokens = self.patch2emb(unmasked_tokens)  # [num_unmasked, 1, d_model]
+        print(f"9. 投影后未掩码token维度: {unmasked_tokens.shape}")
+        
+        # 编码未掩码的token
+        encoded_tokens = unmasked_tokens
+        for i, encoder in enumerate(self.time_encoder):
+            print(f"\n10. 编码器 {i+1} 输入维度: {encoded_tokens.shape}")
+            encoded_tokens, _ = encoder(encoded_tokens)
+            print(f"    编码器 {i+1} 输出维度: {encoded_tokens.shape}")
+        
+        # 重塑编码后的token
+        encoded_tokens = encoded_tokens.reshape(-1, self.d_model)  # [num_unmasked, d_model]
+        print(f"\n11. 编码后token维度: {encoded_tokens.shape}")
+        
+        # 组合编码后的token和掩码token
+        tokens = torch.zeros(bs, num_patch, n_vars, self.d_model, device=device)
+        print(f"\n12. 组合前维度检查:")
+        print(f"12.1 tokens维度: {tokens.shape}")
+        print(f"12.2 patch_mask维度: {patch_mask.shape}")
+        print(f"12.3 encoded_tokens维度: {encoded_tokens.shape}")
+        print(f"12.4 time_mask_token维度: {self.time_mask_token.shape}")
+        
+        # 创建索引映射
+        unmasked_indices = torch.where(patch_mask.reshape(-1))[0]  # [num_unmasked]
+        print(f"\n13. unmasked_indices维度: {unmasked_indices.shape}")
+        
+        # 使用索引赋值
+        tokens.reshape(-1, self.d_model)[unmasked_indices] = encoded_tokens
+        tokens.reshape(-1, self.d_model)[~unmasked_indices] = self.time_mask_token
+        print(f"14. 组合后tokens维度: {tokens.shape}")
+        
+        # 解码所有token
+        decoded_tokens = tokens
+        for i, decoder in enumerate(self.time_decoder):
+            print(f"\n15. 解码器 {i+1} 输入维度: {decoded_tokens.shape}")
+            # 调整维度以适应解码器
+            decoded_tokens = decoded_tokens.reshape(bs * n_vars, num_patch, self.d_model)  # [bs*n_vars, num_patch, d_model]
+            print(f"    解码器 {i+1} 调整后输入维度: {decoded_tokens.shape}")
+            decoded_tokens, _ = decoder(decoded_tokens)
+            print(f"    解码器 {i+1} 输出维度: {decoded_tokens.shape}")
+            # 恢复原始维度
+            decoded_tokens = decoded_tokens.reshape(bs, num_patch, n_vars, self.d_model)  # [bs, num_patch, n_vars, d_model]
+            print(f"    解码器 {i+1} 恢复后维度: {decoded_tokens.shape}")
+        
+        # 投影回原始维度
+        decoded_tokens = self.emb2patch(decoded_tokens)  # [bs, num_patch, n_vars, patch_len]
+        print(f"\n16. 最终输出维度: {decoded_tokens.shape}")
+        
+        return decoded_tokens, patch_mask
         
     def freq_masking(self, x):
         """
@@ -303,32 +369,64 @@ class TimeFreqMasking(nn.Module):
         bs, num_patch, n_vars, patch_len = x.shape
         device = x.device
         
+        print(f"\n频域掩码处理维度追踪:")
+        print(f"1. 输入维度: {x.shape}")
+        
         # 对每个patch进行FFT
         cx = torch.fft.rfft(x, dim=-1)  # [bs, num_patch, n_vars, patch_len//2+1]
+        print(f"2. FFT后维度: {cx.shape}")
         
         # 计算每个patch的频率幅度
         mag = torch.sqrt(cx.real**2 + cx.imag**2)  # [bs, num_patch, n_vars, patch_len//2+1]
+        print(f"3. 频率幅度维度: {mag.shape}")
         
         # 计算每个patch的频率重要性得分
         patch_freq_score = mag.mean(dim=-1)  # [bs, num_patch, n_vars]
+        print(f"4. 频率重要性得分维度: {patch_freq_score.shape}")
         
         # 选择频率重要性最低的patch进行掩码
         num_masks = int(num_patch * self.freq_ratio)
         _, mask_idx = torch.topk(patch_freq_score, k=num_masks, dim=1, largest=False)  # [bs, num_masks, n_vars]
+        print(f"5. 掩码索引维度: {mask_idx.shape}")
         
         # 生成掩码
-        mask = torch.ones_like(x, dtype=torch.bool, device=device)
+        mask = torch.ones((bs, num_patch, n_vars), dtype=torch.bool, device=device)  # [bs, num_patch, n_vars]
+        print(f"6. 初始掩码维度: {mask.shape}")
         
         # 应用掩码
         for i in range(bs):
             for j in range(n_vars):
                 for k in range(num_masks):
                     if mask_idx[i,k,j] < num_patch:  # 确保索引在有效范围内
-                        mask[i, mask_idx[i,k,j], j, :] = 0
+                        mask[i, mask_idx[i,k,j], j] = 0
+        
+        print(f"7. 应用掩码后:")
+        print(f"7.1 掩码中True的数量: {mask.sum().item()}")
+        print(f"7.2 掩码中False的数量: {(~mask).sum().item()}")
         
         # 使用可学习的掩码token替换被掩码的位置
         x_masked = x.clone()
-        x_masked[~mask] = self.freq_mask_token
+        
+        # 投影到模型维度
+        x_masked = x_masked.reshape(-1, 1, patch_len)  # [bs*num_patch*n_vars, 1, patch_len]
+        x_masked = self.patch2emb(x_masked)  # [bs*num_patch*n_vars, 1, d_model]
+        x_masked = x_masked.reshape(bs, num_patch, n_vars, self.d_model)  # [bs, num_patch, n_vars, d_model]
+        print(f"8. 投影后维度: {x_masked.shape}")
+        
+        # 应用掩码
+        mask = mask.unsqueeze(-1)  # [bs, num_patch, n_vars, 1]
+        mask = mask.expand(-1, -1, -1, self.d_model)  # [bs, num_patch, n_vars, d_model]
+        
+        # 扩展掩码token到正确的维度
+        freq_mask_token = self.freq_mask_token.expand(bs, num_patch, n_vars, self.d_model)  # [bs, num_patch, n_vars, d_model]
+        x_masked = torch.where(mask, x_masked, freq_mask_token)  # 使用where替代直接索引
+        print(f"9. 掩码后维度: {x_masked.shape}")
+        
+        # 投影回原始维度
+        x_masked = x_masked.reshape(-1, self.d_model)  # [bs*num_patch*n_vars, d_model]
+        x_masked = self.emb2patch(x_masked)  # [bs*num_patch*n_vars, patch_len]
+        x_masked = x_masked.reshape(bs, num_patch, n_vars, patch_len)  # [bs, num_patch, n_vars, patch_len]
+        print(f"10. 最终输出维度: {x_masked.shape}")
         
         return x_masked, mask
         
@@ -350,6 +448,180 @@ class TimeFreqMasking(nn.Module):
             return x_masked
         else:
             return x
+
+
+class DynamicTimeFreqMasking(TimeFreqMasking):
+    def __init__(self, mask_ratio: float = 0.4, time_ratio: float = 0.5, freq_ratio: float = 0.4, 
+                 patch_size: int = 12, d_model: int = 512, n_heads: int = 8, n_layers: int = 3):
+        super().__init__(mask_ratio, time_ratio, freq_ratio, patch_size)
+        
+        # 保存d_model参数
+        self.d_model = d_model
+        
+        # 添加投影层
+        self.patch2emb = nn.Linear(patch_size, d_model)  # patch_len -> d_model
+        self.emb2patch = nn.Linear(d_model, patch_size)  # d_model -> patch_len
+        
+        # 时间掩码编码器-解码器
+        self.time_encoder = nn.ModuleList([
+            TemporalTransformer(
+                d_model=d_model,
+                dim_k=d_model // n_heads,
+                dim_v=d_model // n_heads,
+                n_heads=n_heads,
+                dim_fc=d_model,
+                dropout=0.1,
+                half=False,
+                return_attn=True
+            ) for _ in range(n_layers)
+        ])
+        
+        self.time_decoder = nn.ModuleList([
+            TemporalTransformer(
+                d_model=d_model,
+                dim_k=d_model // n_heads,
+                dim_v=d_model // n_heads,
+                n_heads=n_heads,
+                dim_fc=d_model,
+                dropout=0.1,
+                half=False,
+                return_attn=True
+            ) for _ in range(n_layers)
+        ])
+        
+        # 频率掩码解码器
+        self.freq_decoder = nn.ModuleList([
+            TemporalTransformer(
+                d_model=d_model,
+                dim_k=d_model // n_heads,
+                dim_v=d_model // n_heads,
+                n_heads=n_heads,
+                dim_fc=d_model,
+                dropout=0.1,
+                half=False,
+                return_attn=True
+            ) for _ in range(n_layers)
+        ])
+        
+        # 投影层
+        self.time_proj = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, d_model),
+            nn.Sigmoid()
+        )
+        
+        self.freq_proj = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, d_model),
+            nn.Sigmoid()
+        )
+        
+        # 可学习的掩码token
+        self.time_mask_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        self.freq_mask_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        
+    def time_masking(self, x):
+        """
+        时间域掩码
+        Args:
+            x: 输入数据 [bs, num_patch, n_vars, patch_len]
+        Returns:
+            x_masked: 掩码后的数据
+            mask: 掩码矩阵
+        """
+        bs, num_patch, n_vars, patch_len = x.shape
+        device = x.device
+        
+        print(f"\n时间掩码处理维度追踪:")
+        print(f"1. 输入维度: {x.shape}")
+        
+        # 计算每个patch的变异系数
+        cv = torch.std(x, dim=3) / (torch.mean(x, dim=3) + 1e-6)  # [bs, num_patch, n_vars]
+        print(f"2. 变异系数维度: {cv.shape}")
+        
+        # 对每个变量选择变异系数最大的patch进行掩码
+        patch_mask = torch.ones((bs, num_patch, n_vars), dtype=torch.bool, device=device)  # [bs, num_patch, n_vars]
+        num_masks = int(num_patch * self.time_ratio)
+        print(f"3. 掩码数量: {num_masks}")
+        
+        # 获取变异系数最大的patch索引
+        _, mask_idx = torch.topk(cv, k=num_masks, dim=1)  # [bs, num_masks, n_vars]
+        print(f"4. 掩码索引维度: {mask_idx.shape}")
+        
+        # 应用掩码
+        for i in range(bs):
+            for j in range(n_vars):
+                for k in range(num_masks):
+                    if mask_idx[i,k,j] < num_patch:  # 确保索引在有效范围内
+                        patch_mask[i, mask_idx[i,k,j], j] = 0
+        
+        print(f"5. 掩码矩阵维度: {patch_mask.shape}")
+        print(f"5.1 掩码矩阵中True的数量: {patch_mask.sum().item()}")
+        print(f"5.2 掩码矩阵中False的数量: {(~patch_mask).sum().item()}")
+        
+        # 分离掩码和未掩码的token
+        unmasked_tokens = x[patch_mask]  # [num_unmasked, patch_len]
+        masked_tokens = self.time_mask_token.repeat(bs, num_masks, n_vars, 1)
+        print(f"6. 未掩码token维度: {unmasked_tokens.shape}")
+        print(f"7. 掩码token维度: {masked_tokens.shape}")
+        
+        # 重塑未掩码的token以适应编码器
+        num_unmasked = unmasked_tokens.shape[0]
+        unmasked_tokens = unmasked_tokens.reshape(-1, 1, patch_len)  # [num_unmasked, 1, patch_len]
+        print(f"8. 重塑后未掩码token维度: {unmasked_tokens.shape}")
+        
+        # 投影到模型维度
+        unmasked_tokens = self.patch2emb(unmasked_tokens)  # [num_unmasked, 1, d_model]
+        print(f"9. 投影后未掩码token维度: {unmasked_tokens.shape}")
+        
+        # 编码未掩码的token
+        encoded_tokens = unmasked_tokens
+        for i, encoder in enumerate(self.time_encoder):
+            print(f"\n10. 编码器 {i+1} 输入维度: {encoded_tokens.shape}")
+            encoded_tokens, _ = encoder(encoded_tokens)
+            print(f"    编码器 {i+1} 输出维度: {encoded_tokens.shape}")
+        
+        # 重塑编码后的token
+        encoded_tokens = encoded_tokens.reshape(-1, self.d_model)  # [num_unmasked, d_model]
+        print(f"\n11. 编码后token维度: {encoded_tokens.shape}")
+        
+        # 组合编码后的token和掩码token
+        tokens = torch.zeros(bs, num_patch, n_vars, self.d_model, device=device)
+        print(f"\n12. 组合前维度检查:")
+        print(f"12.1 tokens维度: {tokens.shape}")
+        print(f"12.2 patch_mask维度: {patch_mask.shape}")
+        print(f"12.3 encoded_tokens维度: {encoded_tokens.shape}")
+        print(f"12.4 time_mask_token维度: {self.time_mask_token.shape}")
+        
+        # 创建索引映射
+        unmasked_indices = torch.where(patch_mask.reshape(-1))[0]  # [num_unmasked]
+        print(f"\n13. unmasked_indices维度: {unmasked_indices.shape}")
+        
+        # 使用索引赋值
+        tokens.reshape(-1, self.d_model)[unmasked_indices] = encoded_tokens
+        tokens.reshape(-1, self.d_model)[~unmasked_indices] = self.time_mask_token
+        print(f"14. 组合后tokens维度: {tokens.shape}")
+        
+        # 解码所有token
+        decoded_tokens = tokens
+        for i, decoder in enumerate(self.time_decoder):
+            print(f"\n15. 解码器 {i+1} 输入维度: {decoded_tokens.shape}")
+            # 调整维度以适应解码器
+            decoded_tokens = decoded_tokens.reshape(bs * n_vars, num_patch, self.d_model)  # [bs*n_vars, num_patch, d_model]
+            print(f"    解码器 {i+1} 调整后输入维度: {decoded_tokens.shape}")
+            decoded_tokens, _ = decoder(decoded_tokens)
+            print(f"    解码器 {i+1} 输出维度: {decoded_tokens.shape}")
+            # 恢复原始维度
+            decoded_tokens = decoded_tokens.reshape(bs, num_patch, n_vars, self.d_model)  # [bs, num_patch, n_vars, d_model]
+            print(f"    解码器 {i+1} 恢复后维度: {decoded_tokens.shape}")
+        
+        # 投影回原始维度
+        decoded_tokens = self.emb2patch(decoded_tokens)  # [bs, num_patch, n_vars, patch_len]
+        print(f"\n16. 最终输出维度: {decoded_tokens.shape}")
+        
+        return decoded_tokens, patch_mask
 
 
 class STPatchFormer(nn.Module):
@@ -464,8 +736,8 @@ class STPatchMaskFormer(STPatchFormer):
                  time_ratio: float = 0.5, freq_ratio: float = 0.4, patch_size: int = 12):
         super().__init__(c_in, seq_len, patch_len, stride, max_seq_len, n_layers, d_model, n_heads, d_ff,
                         shared_embedding, attn_dropout, dropout, act)
-        # 使用新的 TimeFreqMasking 替换原来的 RandomMasking
-        self.mask = TimeFreqMasking(mask_ratio, time_ratio, freq_ratio, patch_size)
+        # 使用新的 DynamicTimeFreqMasking 替换原来的 TimeFreqMasking
+        self.mask = DynamicTimeFreqMasking(mask_ratio, time_ratio, freq_ratio, patch_size, d_model, n_heads, n_layers)
         
         # 添加训练相关的组件
         self.criterion = nn.MSELoss()
@@ -620,7 +892,6 @@ class STPatchMaskFormer(STPatchFormer):
             print(f"   y_true_time: {y_true_time.shape}")
             print(f"   time_scores: {time_scores.shape}")
             
-            # 计算AUC分数
             try:
                 # 展平数组以计算AUC
                 y_true_region_flat = y_true_region.reshape(-1)
@@ -648,9 +919,9 @@ class STPatchMaskFormer(STPatchFormer):
                 print(f"\n7. AUC分数:")
                 print(f"   region_auc: {region_auc:.4f}")
                 print(f"   time_auc: {time_auc:.4f}")
-                
-                return {
-                    'region_auc': region_auc,
+            
+            return {
+                'region_auc': region_auc,
                     'time_auc': time_auc
                 }
             except Exception as e:
