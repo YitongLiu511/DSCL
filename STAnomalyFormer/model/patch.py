@@ -9,6 +9,7 @@ from .tsfm import TemporalTransformer
 from .module import SingleGCN, MultiheadAttention
 from .embed import TemporalEmbedding
 from .revin import RevIN
+from .contrastive import compute_contrastive_loss, compute_anomaly_score
 
 
 def random_masking(xb, mask_ratio):
@@ -736,11 +737,16 @@ class STPatchMaskFormer(STPatchFormer):
                  time_ratio: float = 0.5, freq_ratio: float = 0.4, patch_size: int = 12):
         super().__init__(c_in, seq_len, patch_len, stride, max_seq_len, n_layers, d_model, n_heads, d_ff,
                         shared_embedding, attn_dropout, dropout, act)
+        
         # 使用新的 DynamicTimeFreqMasking 替换原来的 TimeFreqMasking
         self.mask = DynamicTimeFreqMasking(mask_ratio, time_ratio, freq_ratio, patch_size, d_model, n_heads, n_layers)
         
         # 添加训练相关的组件
         self.criterion = nn.MSELoss()
+        
+        # 导入对比损失函数
+        self.compute_contrastive_loss = compute_contrastive_loss
+        self.compute_anomaly_score = compute_anomaly_score
         
     def forward(self, x, return_dict=False):
         print(f"\nSTPatchMaskFormer前向传播维度追踪:")
@@ -756,11 +762,13 @@ class STPatchMaskFormer(STPatchFormer):
         
         # 3. 应用掩码
         if self.training:
-            x = self.mask(x)  # 使用新的掩码机制
-            print(f"4. 掩码后维度: {x.shape}")
+            x_masked = self.mask(x)  # 使用新的掩码机制
+            print(f"4. 掩码后维度: {x_masked.shape}")
+        else:
+            x_masked = x
         
         # 4. 分片编码
-        z = self.patch_tsfm(x)  # [bs, n_vars, num_patch, d_model]
+        z = self.patch_tsfm(x_masked)  # [bs, n_vars, num_patch, d_model]
         print(f"5. 编码后维度: {z.shape}")
         
         # 5. 输出投影
@@ -795,6 +803,10 @@ class STPatchMaskFormer(STPatchFormer):
                 z = z[0]  # 取第一个batch的预测结果
             print(f"12. z调整后维度: {z.shape}")
             
+            # 计算重建损失
+            recon_loss = self.criterion(z, x_reshaped)
+            
+            # 计算异常分数
             anomaly_scores = torch.abs(z - x_reshaped)  # [bs, seq_len, n_vars]
             print(f"13. anomaly_scores维度: {anomaly_scores.shape}")
             
@@ -838,7 +850,8 @@ class STPatchMaskFormer(STPatchFormer):
                 'anomaly_regions': anomaly_regions,
                 'anomaly_timestamps': anomaly_timestamps,
                 'region_threshold': region_thresh,
-                'time_threshold': time_thresh
+                'time_threshold': time_thresh,
+                'recon_loss': recon_loss
             }
         
         return z

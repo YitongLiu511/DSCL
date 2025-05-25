@@ -32,7 +32,7 @@ parser.add_argument('--t_half', action='store_true')
 parser.add_argument('--s_half', action='store_true')
 parser.add_argument('--n_gcn', default=3, type=int)  # GCN层数3
 parser.add_argument('--lr', default=0.001, type=float)  # 学习率0.001
-parser.add_argument('--epochs', default=500, type=int)  # 训练轮数500
+parser.add_argument('--epochs', default=1, type=int)  # 训练轮数改为1
 parser.add_argument('--seed', default=42, type=int)
 parser.add_argument('--repeat', default=10, type=int)  # 独立运行10次
 parser.add_argument('--verbose', action='store_true')
@@ -46,8 +46,9 @@ parser.add_argument('--temperature', type=float, default=50.0)
 parser.add_argument('--anormly_ratio', type=float, default=0.1)
 parser.add_argument('--time_threshold', type=float, default=0.7, help='时间异常注入的阈值μ')
 parser.add_argument('--k_neighbors', type=int, default=None, help='空间异常注入时采样的邻居节点数')
+parser.add_argument('--time_window', type=int, default=120, help='时间异常检测窗口（分钟）')
 
-parser.add_argument('--cuda', action='store_true', default=True)  # 默认使用GPU
+parser.add_argument('--cuda', action='store_true', default=False)  # 默认使用CPU
 
 # 掩码相关参数
 parser.add_argument('--time_ratio', type=float, default=0.5, help='时间掩码比例')
@@ -151,6 +152,14 @@ print(f"Patch大小: {args.patch_len}")
 print(f"步长: {args.stride}")
 print(f"分片数量: {n_patches}")
 
+# 计算时间分片大小
+time_interval = 10  # 每个时间点间隔10分钟
+time_patch_len = args.time_window // time_interval  # 根据时间窗口计算分片大小
+print(f"\n时间异常检测设置:")
+print(f"时间窗口: {args.time_window}分钟")
+print(f"时间点间隔: {time_interval}分钟")
+print(f"分片大小: {time_patch_len}个时间点")
+
 # 创建异常注入器
 injector = AnomalyInjector(
     n_nodes=X.shape[0],  # 263个节点
@@ -169,15 +178,22 @@ for t in range(args.repeat):
     if isinstance(test_X, torch.Tensor):
         test_X = test_X.cpu().numpy()
     
-    # 对测试数据进行分片
-    test_X_patched = np.zeros((test_X.shape[0], n_patches, args.patch_len, test_X.shape[2]))
+    # 对测试数据进行时间分片
+    test_X_time_patched = np.zeros((test_X.shape[0], n_patches, time_patch_len, test_X.shape[2]))
     for i in range(n_patches):
         start_idx = i * args.stride
-        test_X_patched[:, i] = test_X[:, start_idx:start_idx + args.patch_len]
+        test_X_time_patched[:, i] = test_X[:, start_idx:start_idx + time_patch_len]
+
+    # 区域异常处理（使用因果卷积后的特征）
+    test_X_region_patched = np.zeros((test_X.shape[0], n_patches, args.patch_len, test_X.shape[2]))
+    for i in range(n_patches):
+        start_idx = i * args.stride
+        # 这里应该使用经过因果卷积处理后的特征
+        test_X_region_patched[:, i] = test_X[:, start_idx:start_idx + args.patch_len]
 
     # 注入异常并获取异常掩码
     test_X_patched_injected, anomaly_mask = injector.inject_anomalies(
-        test_X_patched,
+        test_X_region_patched,
         inject_time=True,
         inject_space=True,
         return_mask=True
