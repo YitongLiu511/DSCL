@@ -6,7 +6,7 @@ from sklearn.metrics import roc_auc_score
 import math
 
 from .tsfm import TemporalTransformer
-from .module import SingleGCN, MultiheadAttention
+from .module import SingleGCN, MultiheadAttention, SoftClusterLayer, MultipleGCN
 from .embed import TemporalEmbedding
 from .revin import RevIN
 from .contrastive import compute_contrastive_loss, compute_anomaly_score, compute_adversarial_contrastive_loss
@@ -734,12 +734,31 @@ class STPatchFormer(nn.Module):
 class STPatchMaskFormer(STPatchFormer):
     def __init__(self, c_in, seq_len, patch_len, stride, max_seq_len, n_layers, d_model, n_heads, d_ff, 
                  shared_embedding=True, attn_dropout=0., dropout=0., act='gelu', mask_ratio: float = 0.4, 
-                 time_ratio: float = 0.5, freq_ratio: float = 0.4, patch_size: int = 12):
+                 time_ratio: float = 0.5, freq_ratio: float = 0.4, patch_size: int = 12,
+                 n_clusters: int = 8, temperature: float = 0.07, n_gcn: int = 3):
         super().__init__(c_in, seq_len, patch_len, stride, max_seq_len, n_layers, d_model, n_heads, d_ff,
                         shared_embedding, attn_dropout, dropout, act)
         
         # 使用新的 DynamicTimeFreqMasking 替换原来的 TimeFreqMasking
         self.mask = DynamicTimeFreqMasking(mask_ratio, time_ratio, freq_ratio, patch_size, d_model, n_heads, n_layers)
+        
+        # 添加空间异常检测组件
+        self.soft_cluster = SoftClusterLayer(
+            c_in=d_model,
+            nmb_prototype=n_clusters,
+            tau=temperature
+        )
+        
+        # 创建一个默认的邻接矩阵
+        default_adj = torch.ones(c_in, c_in) / c_in  # 创建一个均匀分布的邻接矩阵
+        default_adj = default_adj.unsqueeze(0)  # 添加一个维度以匹配 MultipleGCN 的要求
+        
+        self.multiple_gcn = MultipleGCN(
+            in_channels=d_model,
+            out_channels=d_model,
+            matrices=default_adj,  # 使用默认邻接矩阵
+            n_layers=n_gcn
+        )
         
         # 添加训练相关的组件
         self.criterion = nn.MSELoss()
@@ -747,6 +766,20 @@ class STPatchMaskFormer(STPatchFormer):
         # 导入对比损失函数
         self.compute_contrastive_loss = compute_contrastive_loss
         self.compute_anomaly_score = compute_anomaly_score
+        
+        # 添加空间特征投影层
+        self.spatial_proj = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, d_model)
+        )
+        
+        # 添加特征融合层
+        self.fusion_layer = nn.Sequential(
+            nn.Linear(d_model * 2, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, d_model)
+        )
         
     def get_features(self, x):
         """
@@ -798,24 +831,50 @@ class STPatchMaskFormer(STPatchFormer):
         z = self.patch_tsfm(x_masked)  # [bs, n_vars, num_patch, d_model]
         print(f"5. 编码后维度: {z.shape}")
         
-        # 5. 输出投影
-        z = self.output_proj(z)  # [bs, n_vars, num_patch, c_in]
-        print(f"6. 投影后维度: {z.shape}")
+        # 5. 空间异常检测
+        # 5.1 区域特征学习
+        region_features, cluster_loss = self.soft_cluster(z)  # [bs, n_vars, num_patch, d_model]
+        print(f"6. 区域特征维度: {region_features.shape}")
         
-        # 6. 还原到原始维度
+        # 5.2 多视图图卷积
+        # 构建邻接矩阵
+        bs, n_vars, num_patch, d_model = region_features.shape
+        adj_mat = torch.ones(n_vars, n_vars, device=x.device) / n_vars
+        
+        # 调整维度以适应MultipleGCN
+        region_features_reshaped = region_features.reshape(bs * num_patch, n_vars, d_model)  # [bs*num_patch, n_vars, d_model]
+        
+        # 应用图卷积
+        spatial_features, _ = self.multiple_gcn(region_features_reshaped)  # [bs*num_patch, n_vars, d_model]
+        spatial_features = spatial_features.reshape(bs, num_patch, n_vars, d_model)  # [bs, num_patch, n_vars, d_model]
+        spatial_features = spatial_features.permute(0, 2, 1, 3)  # [bs, n_vars, num_patch, d_model]
+        print(f"7. 空间特征维度: {spatial_features.shape}")
+        
+        # 5.3 特征融合
+        # 确保两个特征具有相同的维度
+        fused_features = self.fusion_layer(
+            torch.cat([region_features, spatial_features], dim=-1)
+        )  # [bs, n_vars, num_patch, d_model]
+        print(f"8. 融合特征维度: {fused_features.shape}")
+        
+        # 6. 输出投影
+        z = self.output_proj(fused_features)  # [bs, n_vars, num_patch, c_in]
+        print(f"9. 投影后维度: {z.shape}")
+        
+        # 7. 还原到原始维度
         bs, n_vars, num_patch, c_in = z.shape
         z = z.transpose(1, 2)  # [bs, num_patch, n_vars, c_in]
-        print(f"7. 维度重排后: {z.shape}")
+        print(f"10. 维度重排后: {z.shape}")
         
-        # 7. 还原分片
+        # 8. 还原分片
         z = z.reshape(bs, -1, n_vars)  # [bs, num_patch*c_in, n_vars]
-        print(f"8. 还原分片后: {z.shape}")
+        print(f"11. 还原分片后: {z.shape}")
         z = z[:, :self.seq_len, :]  # 截取到原始序列长度
-        print(f"9. 截取长度后: {z.shape}")
+        print(f"12. 截取长度后: {z.shape}")
         
-        # 8. 反归一化
+        # 9. 反归一化
         z = self.revin(z, 'denorm')
-        print(f"10. 最终输出维度: {z.shape}")
+        print(f"13. 最终输出维度: {z.shape}")
         
         if return_dict:
             print("\n异常分数计算维度追踪:")
@@ -823,12 +882,12 @@ class STPatchMaskFormer(STPatchFormer):
             # 确保x和z的维度匹配
             x_reshaped = x.reshape(bs, -1, n_vars)  # [bs, seq_len, n_vars]
             x_reshaped = x_reshaped[:, :self.seq_len, :]  # 截取到原始序列长度
-            print(f"11. x_reshaped维度: {x_reshaped.shape}")
+            print(f"14. x_reshaped维度: {x_reshaped.shape}")
             
             # 确保z的维度正确
             if len(z.shape) == 4:  # 如果z是[bs, bs, seq_len, n_vars]
                 z = z[0]  # 取第一个batch的预测结果
-            print(f"12. z调整后维度: {z.shape}")
+            print(f"15. z调整后维度: {z.shape}")
             
             # 计算重建损失
             recon_loss = self.criterion(z, x_reshaped)
@@ -847,50 +906,28 @@ class STPatchMaskFormer(STPatchFormer):
             
             # 计算异常分数
             anomaly_scores = torch.abs(z - x_reshaped)  # [bs, seq_len, n_vars]
-            print(f"13. anomaly_scores维度: {anomaly_scores.shape}")
+            print(f"16. anomaly_scores维度: {anomaly_scores.shape}")
             
             # 分离时间和空间异常分数
             region_scores = anomaly_scores.mean(dim=1)  # [bs, n_vars]
             time_scores = anomaly_scores.mean(dim=2)    # [bs, seq_len]
-            print(f"14. region_scores维度: {region_scores.shape}")
-            print(f"15. time_scores维度: {time_scores.shape}")
+            print(f"17. region_scores维度: {region_scores.shape}")
+            print(f"18. time_scores维度: {time_scores.shape}")
             
             # 调整维度以匹配
-            region_scores = region_scores.unsqueeze(1).expand(-1, self.seq_len, -1)  # [bs, seq_len, n_vars]
-            time_scores = time_scores.unsqueeze(2).expand(-1, -1, n_vars)  # [bs, seq_len, n_vars]
-            print(f"16. region_scores调整后维度: {region_scores.shape}")
-            print(f"17. time_scores调整后维度: {time_scores.shape}")
+            region_scores = region_scores.unsqueeze(1).expand(-1, self.seq_len, -1)
+            time_scores = time_scores.unsqueeze(-1).expand(-1, -1, n_vars)
             
-            # 计算阈值
-            region_thresh = torch.quantile(region_scores, 0.9)
-            time_thresh = torch.quantile(time_scores, 0.9)
-            print(f"18. region_thresh: {region_thresh}")
-            print(f"19. time_thresh: {time_thresh}")
-            
-            # 预测异常
-            region_pred = (region_scores > region_thresh).float()
-            time_pred = (time_scores > time_thresh).float()
-            print(f"20. region_pred维度: {region_pred.shape}")
-            print(f"21. time_pred维度: {time_pred.shape}")
-            
-            # 获取异常区域和时间戳
-            anomaly_regions = torch.where(region_pred == 1)[1]
-            anomaly_timestamps = torch.where(time_pred == 1)[1]
-            print(f"22. anomaly_regions数量: {len(anomaly_regions)}")
-            print(f"23. anomaly_timestamps数量: {len(anomaly_timestamps)}")
+            # 组合异常分数
+            anomaly_scores = torch.stack([region_scores, time_scores], dim=-1)
+            print(f"19. 最终异常分数维度: {anomaly_scores.shape}")
             
             return {
                 'reconstruction': z,
-                'anomaly_scores': torch.stack([region_scores, time_scores], dim=-1),
-                'region_scores': region_scores,
-                'time_scores': time_scores,
-                'region_pred': region_pred,
-                'time_pred': time_pred,
-                'anomaly_regions': anomaly_regions,
-                'anomaly_timestamps': anomaly_timestamps,
-                'region_threshold': region_thresh,
-                'time_threshold': time_thresh,
-                'recon_loss': recon_loss
+                'anomaly_scores': anomaly_scores,
+                'recon_loss': recon_loss,
+                'region_features': region_features,
+                'spatial_features': spatial_features
             }
         
         return z
