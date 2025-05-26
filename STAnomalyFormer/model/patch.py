@@ -9,7 +9,7 @@ from .tsfm import TemporalTransformer
 from .module import SingleGCN, MultiheadAttention
 from .embed import TemporalEmbedding
 from .revin import RevIN
-from .contrastive import compute_contrastive_loss, compute_anomaly_score
+from .contrastive import compute_contrastive_loss, compute_anomaly_score, compute_adversarial_contrastive_loss
 
 
 def random_masking(xb, mask_ratio):
@@ -748,6 +748,33 @@ class STPatchMaskFormer(STPatchFormer):
         self.compute_contrastive_loss = compute_contrastive_loss
         self.compute_anomaly_score = compute_anomaly_score
         
+    def get_features(self, x):
+        """
+        获取输入数据的特征表示
+        Args:
+            x: 输入数据 [bs, seq_len, n_vars]
+        Returns:
+            features: 特征表示 [bs, seq_len, d_model]
+        """
+        # 1. 分片处理
+        patch_x = self.patch(x)  # [bs, num_patch, n_vars, patch_len]
+        
+        # 2. 数据归一化
+        x = self.revin(patch_x.transpose(2, 3), 'norm').transpose(2, 3)
+        
+        # 3. 分片编码
+        z = self.patch_tsfm(x)  # [bs, n_vars, num_patch, d_model]
+        
+        # 4. 调整维度顺序
+        z = z.transpose(1, 2)  # [bs, num_patch, n_vars, d_model]
+        
+        # 5. 还原分片
+        bs, num_patch, n_vars, d_model = z.shape
+        z = z.reshape(bs, -1, n_vars)  # [bs, num_patch*d_model, n_vars]
+        z = z[:, :self.seq_len, :]  # 截取到原始序列长度
+        
+        return z
+
     def forward(self, x, return_dict=False):
         print(f"\nSTPatchMaskFormer前向传播维度追踪:")
         print(f"1. 输入数据维度: {x.shape}")
@@ -805,6 +832,18 @@ class STPatchMaskFormer(STPatchFormer):
             
             # 计算重建损失
             recon_loss = self.criterion(z, x_reshaped)
+            
+            # 在训练模式下进行对抗训练
+            if self.training:
+                # 计算对抗对比损失
+                adv_loss, normal_loss, anomaly_loss = compute_adversarial_contrastive_loss(
+                    self.mask.time_encoder[-1].output,  # 时间掩码分支的输出
+                    self.mask.freq_decoder[-1].output,  # 频率掩码分支的输出
+                    temperature=50.0
+                )
+                
+                # 将对抗损失添加到总损失中
+                recon_loss = recon_loss + adv_loss
             
             # 计算异常分数
             anomaly_scores = torch.abs(z - x_reshaped)  # [bs, seq_len, n_vars]
