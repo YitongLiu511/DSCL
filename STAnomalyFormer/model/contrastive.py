@@ -93,3 +93,48 @@ def compute_anomaly_score(tematt, freatt, temperature=50.0):
     metric = torch.softmax((adv_loss + con_loss), dim=-1)
     
     return metric 
+
+def compute_adversarial_contrastive_loss(tematt, freatt, temperature=50.0):
+    """
+    计算对抗对比损失
+    Args:
+        tematt: 时间掩码分支的输出特征列表
+        freatt: 频率掩码分支的输出特征列表
+        temperature: 温度参数
+    Returns:
+        total_loss: 总损失
+        normal_loss: 正常样本的对比损失
+        anomaly_loss: 异常样本的对比损失
+    """
+    # 1. 计算正常样本的对比损失（最小化）
+    normal_loss = compute_contrastive_loss(tematt, freatt, temperature)[0]
+    
+    # 2. 计算异常样本的对比损失（最大化）
+    anomaly_loss = -compute_contrastive_loss(tematt, freatt, temperature)[0]
+    
+    # 3. 总损失
+    total_loss = normal_loss + anomaly_loss
+    
+    return total_loss, normal_loss, anomaly_loss
+
+def generate_anomaly_features(x, model):
+    """
+    生成异常样本特征
+    Args:
+        x: 输入数据 [bs, seq_len, n_vars]
+        model: 模型实例
+    Returns:
+        anomaly_features: 异常样本特征
+    """
+    # 1. 添加随机噪声
+    noise = torch.randn_like(x) * 0.1
+    x_noisy = x + noise
+    
+    # 2. 时间维度上的扰动
+    x_shifted = torch.roll(x, shifts=1, dims=1)
+    
+    # 3. 获取特征
+    noisy_features = model.get_features(x_noisy)
+    shifted_features = model.get_features(x_shifted)
+    
+    return [noisy_features, shifted_features] 
