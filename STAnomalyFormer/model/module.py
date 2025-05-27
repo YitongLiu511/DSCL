@@ -348,7 +348,7 @@ class SoftClusterLayer(nn.Module):
     def __init__(self, c_in, nmb_prototype, poi_sim=None, dist_mat=None, tau=0.5):
         super(SoftClusterLayer, self).__init__()
         self.l2norm = lambda x: F.normalize(x, dim=1, p=2)
-        self.prototypes = nn.Linear(c_in, nmb_prototype, bias=False)
+        self.prototypes = nn.Linear(c_in * 23, nmb_prototype, bias=False)  # 23是时间步长
         self.tau = tau
         self.d_model = c_in
         
@@ -378,18 +378,25 @@ class SoftClusterLayer(nn.Module):
     def compute_hard_negative_mask(self, z):
         """计算困难负样本掩码
         Args:
-            z: 节点特征 [B, N, D]
+            z: 节点特征 [B, N, T, D] 或 [B, N, D]
         Returns:
             mask: 困难负样本掩码 [B, N, N]
         """
         if self.poi_sim is None or self.dist_mat is None:
             return None
             
-        B, N, D = z.shape
+        # 处理4维输入
+        if len(z.shape) == 4:
+            B, N, T, D = z.shape  # B=263, N=14, T=23, D=128
+            # 将时间维度压缩到特征维度
+            z = z.reshape(B, N, -1)  # [263, 14, 23*128]
+        else:
+            B, N, D = z.shape
+            
         device = z.device
         
         # 重塑特征以计算相似度
-        z_reshaped = z.reshape(-1, D)  # [B*N, D]
+        z_reshaped = z.reshape(-1, z.shape[-1])  # [B*N, D]
         
         # 计算特征相似度
         feat_sim = torch.matmul(z_reshaped, z_reshaped.t())  # [B*N, B*N]
@@ -398,8 +405,8 @@ class SoftClusterLayer(nn.Module):
         feat_sim = feat_sim.reshape(B, N, B, N)  # [B, N, B, N]
         
         # 标准化POI相似度和距离
-        poi_sim_norm = F.normalize(self.poi_sim, p=2, dim=1)  # [N, N]
-        dist_norm = F.normalize(self.dist_mat, p=2, dim=1)    # [N, N]
+        poi_sim_norm = F.normalize(self.poi_sim, p=2, dim=1)  # [263, 263]
+        dist_norm = F.normalize(self.dist_mat, p=2, dim=1)    # [263, 263]
         
         # 创建批次掩码
         mask = torch.zeros((B, N, N), device=device)
@@ -410,16 +417,40 @@ class SoftClusterLayer(nn.Module):
             curr_feat_sim = feat_sim[b, :, b, :]  # [N, N]
             
             # 计算语义-空间不一致性
-            semantic_spatial_inconsistency = torch.abs(curr_feat_sim - poi_sim_norm)
-            spatial_semantic_inconsistency = torch.abs(curr_feat_sim - dist_norm)
+            semantic_spatial_inconsistency = torch.abs(curr_feat_sim - poi_sim_norm[:N, :N])
+            spatial_semantic_inconsistency = torch.abs(curr_feat_sim - dist_norm[:N, :N])
             
             # 合并两种不一致性
             inconsistency = semantic_spatial_inconsistency + spatial_semantic_inconsistency
             
+            # 归一化不一致性到[0,1]区间
+            inconsistency = (inconsistency - inconsistency.min()) / (inconsistency.max() - inconsistency.min() + 1e-8)
+            
             # 使用贝塔分布估计真负样本概率
-            alpha = F.softplus(self.beta_params[0])
-            beta = F.softplus(self.beta_params[1])
-            true_negative_prob = torch.distributions.Beta(alpha, beta).cdf(inconsistency)
+            alpha = F.softplus(self.beta_params[0])  # [2]
+            beta = F.softplus(self.beta_params[1])   # [2]
+            
+            # 为每个不一致性值创建对应的Beta分布
+            alpha = alpha.unsqueeze(0).unsqueeze(0)  # [1, 1, 2]
+            beta = beta.unsqueeze(0).unsqueeze(0)    # [1, 1, 2]
+            
+            # 将inconsistency扩展为3维
+            inconsistency = inconsistency.unsqueeze(-1)  # [N, N, 1]
+            
+            # 创建Beta分布
+            beta_dist = torch.distributions.Beta(
+                alpha.expand(N, N, 2),  # 扩展到[N, N, 2]
+                beta.expand(N, N, 2)    # 扩展到[N, N, 2]
+            )
+            
+            # 计算PDF值
+            pdf_values = beta_dist.log_prob(inconsistency).exp()  # [N, N, 2]
+            
+            # 对两个分布的结果取平均
+            pdf_values = pdf_values.mean(dim=-1)  # [N, N]
+            
+            # 归一化PDF值
+            true_negative_prob = pdf_values / (pdf_values.max() + 1e-8)
             
             # 生成困难负样本掩码
             mask[b] = (true_negative_prob > 0.5).float()
@@ -432,11 +463,17 @@ class SoftClusterLayer(nn.Module):
     def forward(self, z):
         """Compute the contrastive loss of batched data.
         Args:
-            z: 节点特征 [B, N, D]
+            z: 节点特征 [B, N, T, D] 或 [B, N, D]
         Returns:
             z: 更新后的特征
             l: 对比损失
         """
+        # 确保输入维度正确
+        if len(z.shape) == 4:
+            B, N, T, D = z.shape
+            # 将时间维度压缩到特征维度
+            z = z.reshape(B, N, -1)  # [B, N, T*D]
+        
         with torch.no_grad():
             w = self.prototypes.weight.data.clone()
             w = self.l2norm(w)
@@ -446,7 +483,7 @@ class SoftClusterLayer(nn.Module):
         hard_negative_mask = self.compute_hard_negative_mask(z)
         
         # 特征归一化
-        z_norm = self.l2norm(z.reshape(-1, self.d_model))
+        z_norm = self.l2norm(z.reshape(-1, z.shape[-1]))  # [B*N, D]
         
         # 计算原型分配
         self.zc = self.prototypes(z_norm)  # [B*N, K]
@@ -457,8 +494,12 @@ class SoftClusterLayer(nn.Module):
             
         # 计算对比损失
         if hard_negative_mask is not None:
+            # 确保掩码维度与zc匹配
+            hard_negative_mask = hard_negative_mask.reshape(-1)  # [B*N]
+            hard_negative_mask = hard_negative_mask[:self.zc.size(0)]  # 截取到相同长度
+            hard_negative_mask = hard_negative_mask.unsqueeze(1)  # [B*N, 1]
+            
             # 应用困难负样本掩码
-            hard_negative_mask = hard_negative_mask.reshape(-1, 1)  # [B*N, 1]
             masked_zc = self.zc * hard_negative_mask
             l = -torch.mean(torch.sum(q * F.log_softmax(masked_zc / self.tau, dim=1), dim=1))
         else:

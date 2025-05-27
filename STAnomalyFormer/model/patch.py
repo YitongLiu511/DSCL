@@ -740,6 +740,9 @@ class STPatchMaskFormer(STPatchFormer):
         super().__init__(c_in, seq_len, patch_len, stride, max_seq_len, n_layers, d_model, n_heads, d_ff,
                         shared_embedding, attn_dropout, dropout, act)
         
+        # 初始化num_patch属性
+        self.num_patch = (max(seq_len, patch_len) - patch_len) // stride + 1
+        
         # 使用新的 DynamicTimeFreqMasking 替换原来的 TimeFreqMasking
         self.mask = DynamicTimeFreqMasking(mask_ratio, time_ratio, freq_ratio, patch_size, d_model, n_heads, n_layers)
         
@@ -838,6 +841,13 @@ class STPatchMaskFormer(STPatchFormer):
         # 5.1 区域特征学习
         region_features, cluster_loss = self.soft_cluster(z)  # [bs, n_vars, num_patch, d_model]
         print(f"6. 区域特征维度: {region_features.shape}")
+        
+        # 调整region_features的维度
+        if len(region_features.shape) == 3:
+            bs, seq_len, feat_dim = region_features.shape
+            region_features = region_features.reshape(bs, seq_len, self.num_patch, -1)
+            region_features = region_features.permute(0, 2, 1, 3)  # [bs, num_patch, n_vars, d_model]
+            region_features = region_features.permute(0, 2, 1, 3)  # [bs, n_vars, num_patch, d_model]
         
         # 5.2 多视图图卷积
         # 构建邻接矩阵

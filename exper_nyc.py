@@ -297,6 +297,8 @@ for t in range(args.repeat):
         time_ratio=args.time_ratio,
         freq_ratio=args.freq_ratio,
         patch_size=args.patch_len,
+        poi_sim=torch.FloatTensor(poi_sim),
+        dist_mat=torch.FloatTensor(dist),
     )
 
     # 训练模型
