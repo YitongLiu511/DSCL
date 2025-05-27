@@ -735,18 +735,21 @@ class STPatchMaskFormer(STPatchFormer):
     def __init__(self, c_in, seq_len, patch_len, stride, max_seq_len, n_layers, d_model, n_heads, d_ff, 
                  shared_embedding=True, attn_dropout=0., dropout=0., act='gelu', mask_ratio: float = 0.4, 
                  time_ratio: float = 0.5, freq_ratio: float = 0.4, patch_size: int = 12,
-                 n_clusters: int = 8, temperature: float = 0.07, n_gcn: int = 3):
+                 n_clusters: int = 8, temperature: float = 0.07, n_gcn: int = 3,
+                 poi_sim=None, dist_mat=None):  # 添加POI和距离参数
         super().__init__(c_in, seq_len, patch_len, stride, max_seq_len, n_layers, d_model, n_heads, d_ff,
                         shared_embedding, attn_dropout, dropout, act)
         
         # 使用新的 DynamicTimeFreqMasking 替换原来的 TimeFreqMasking
         self.mask = DynamicTimeFreqMasking(mask_ratio, time_ratio, freq_ratio, patch_size, d_model, n_heads, n_layers)
         
-        # 添加空间异常检测组件
+        # 添加空间异常检测组件，传入POI和距离信息
         self.soft_cluster = SoftClusterLayer(
             c_in=d_model,
             nmb_prototype=n_clusters,
-            tau=temperature
+            tau=temperature,
+            poi_sim=poi_sim,
+            dist_mat=dist_mat
         )
         
         # 创建一个默认的邻接矩阵
