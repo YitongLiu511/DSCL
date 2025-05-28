@@ -1,7 +1,10 @@
 data/yellow_tripdata_2015-12.csv
 # 忽略整个 data1 文件夹
 data1/
-
+dscl/
+results/
 # 忽略 data 文件夹下的 pems03 和 pems08 相关文件及子目录
 data/pems03*
 data/pems08*
+checkpoint.pt
+STAnomalyFormer/interface/__pycache__/
