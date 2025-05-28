@@ -1,0 +1,3 @@
+"""
+STAnomalyFormer package initialization
+""" 

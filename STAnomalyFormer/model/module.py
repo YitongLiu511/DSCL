@@ -205,22 +205,13 @@ class SingleGCN(nn.Module):
         return x, prior
 
 
-class AdaptiveGaussianKernel(nn.Module):
-    def __init__(self, n_views):
-        super().__init__()
-        self.sigma = nn.Parameter(torch.ones(n_views))  # 可学习的sigma参数
-        
-    def forward(self, dist_mat):
-        # 计算自适应高斯核
-        return torch.exp(-dist_mat.pow(2) / (2 * self.sigma.pow(2)))
-
-
 class MultipleGCN(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        dist_mats: List[torch.Tensor],
+        matrices: torch.tensor,
         n_layers: int = 1,
         activation=F.relu,
         bias: bool = False,
@@ -228,45 +219,63 @@ class MultipleGCN(nn.Module):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.dist_mats = dist_mats
         self.n_layers = n_layers
         self.activation = activation
-        
-        # 为每个距离矩阵创建GCN层
-        self.gcn_layers = nn.ModuleList([
-            SingleGCN(
-                in_channels,
-                out_channels,
-                dist_mat,
-                n_layers,
-                activation,
-                bias
-            ) for dist_mat in dist_mats
-        ])
-        
-        # 融合层
-        self.fusion = nn.Linear(len(dist_mats) * out_channels, out_channels)
-        
+
+        self.n_graph = matrices.shape[0]
+        self.matrices = matrices  # (3, N, N)
+
+        self.sigma = nn.Linear(self.n_graph, matrices.shape[-1])
+        self.alpha = nn.parameter.Parameter(
+            torch.ones(self.n_graph) / self.n_graph)
+        self.linears = nn.ModuleList(
+            [nn.Linear(in_channels, out_channels, bias=bias)] + [
+                nn.Linear(out_channels, out_channels, bias=bias)
+                for _ in range(n_layers)
+            ])
+        self.mask = self.generate_mask()
+
+    def generate_mask(self):
+        # 距离为0的位置设为1
+        matrix = (self.matrices.cpu().detach().numpy() == 0.).astype(int)
+        # 对角线设为0
+        matrix[:, range(matrix.shape[1]), range(matrix.shape[1])] = 0
+        return torch.Tensor(matrix) == 1
+
     def forward(self, x):
-        # 对每个视图进行GCN处理
-        outputs = []
-        attention_maps = []
+        # x: (VAR * NP, N, D)
+        B, N, D = x.shape
+        prior = self.STS  # (N, N)
         
-        for gcn in self.gcn_layers:
-            out, attn = gcn(x)
-            outputs.append(out)
-            attention_maps.append(attn)
+        # 重塑x以适应矩阵乘法
+        x_reshaped = x.reshape(-1, N, D)  # (B, N, D)
         
-        # 拼接所有视图的输出
-        combined = torch.cat(outputs, dim=-1)
+        for i in range(self.n_layers):
+            # 执行矩阵乘法
+            wx = torch.matmul(prior, x_reshaped)  # (B, N, D)
+            x_reshaped = self.activation(self.linears[i](wx))
         
-        # 融合不同视图的特征
-        fused = self.fusion(combined)
+        # 恢复原始形状
+        x = x_reshaped.reshape(B, N, D)
+        return x, prior
+
+    @property
+    def STS(self):
+        sigma = self.sigma.weight.reshape(self.n_graph, 1, -1)
+        sigma = torch.sigmoid(sigma * 5) + 1e-5
+        sigma = torch.pow(3, sigma) - 1
         
-        # 计算平均注意力图
-        avg_attention = torch.stack(attention_maps).mean(dim=0)
+        # 计算每个图的先验概率
+        exp = torch.exp(-self.matrices / (2 * sigma**2))
+        prior = exp / (math.sqrt(2 * math.pi) * sigma)
+        prior = prior.masked_fill(self.mask.to(exp.device), 0)
         
-        return fused, avg_attention
+        # 归一化
+        prior = prior / (prior.sum(1, keepdims=True) + 1e-8)
+        
+        # 合并多个图的先验概率
+        prior = torch.matmul(prior.permute(1, 2, 0), torch.softmax(self.alpha, 0))
+        return prior  # (N, N)
 
 
 def MLP(
@@ -336,13 +345,26 @@ class SoftClusterLayer(nn.Module):
     '''Spatial heterogeneity modeling by using a soft-clustering paradigm.
     '''
 
-    def __init__(self, c_in, nmb_prototype, tau=0.5):
+    def __init__(self, c_in, nmb_prototype, poi_sim=None, dist_mat=None, tau=0.5):
         super(SoftClusterLayer, self).__init__()
         self.l2norm = lambda x: F.normalize(x, dim=1, p=2)
-        self.prototypes = nn.Linear(c_in, nmb_prototype, bias=False)
-
+        self.prototypes = nn.Linear(c_in * 23, nmb_prototype, bias=False)  # 23是时间步长
         self.tau = tau
         self.d_model = c_in
+        
+        # 添加POI相似度和距离矩阵
+        self.poi_sim = poi_sim if poi_sim is not None else None
+        self.dist_mat = dist_mat if dist_mat is not None else None
+        
+        # 添加贝塔混合分布参数
+        self.beta_params = nn.Parameter(torch.ones(2, 2))  # 初始化贝塔分布参数
+        
+        # 添加空间-语义融合层
+        self.fusion_layer = nn.Sequential(
+            nn.Linear(c_in * 2, c_in),
+            nn.GELU(),
+            nn.Linear(c_in, c_in)
+        )
 
         for m in self.modules():
             self.weights_init(m)
@@ -353,23 +375,136 @@ class SoftClusterLayer(nn.Module):
             if m.bias is not None:
                 m.bias.data.fill_(0.0)
 
+    def compute_hard_negative_mask(self, z):
+        """计算困难负样本掩码
+        Args:
+            z: 节点特征 [B, N, T, D] 或 [B, N, D]
+        Returns:
+            mask: 困难负样本掩码 [B, N, N]
+        """
+        if self.poi_sim is None or self.dist_mat is None:
+            return None
+            
+        # 处理4维输入
+        if len(z.shape) == 4:
+            B, N, T, D = z.shape  # B=263, N=14, T=23, D=128
+            # 将时间维度压缩到特征维度
+            z = z.reshape(B, N, -1)  # [263, 14, 23*128]
+        else:
+            B, N, D = z.shape
+            
+        device = z.device
+        
+        # 重塑特征以计算相似度
+        z_reshaped = z.reshape(-1, z.shape[-1])  # [B*N, D]
+        
+        # 计算特征相似度
+        feat_sim = torch.matmul(z_reshaped, z_reshaped.t())  # [B*N, B*N]
+        
+        # 重塑回原始维度
+        feat_sim = feat_sim.reshape(B, N, B, N)  # [B, N, B, N]
+        
+        # 标准化POI相似度和距离
+        poi_sim_norm = F.normalize(self.poi_sim, p=2, dim=1)  # [263, 263]
+        dist_norm = F.normalize(self.dist_mat, p=2, dim=1)    # [263, 263]
+        
+        # 创建批次掩码
+        mask = torch.zeros((B, N, N), device=device)
+        
+        # 对每个批次计算掩码
+        for b in range(B):
+            # 获取当前批次的相似度
+            curr_feat_sim = feat_sim[b, :, b, :]  # [N, N]
+            
+            # 计算语义-空间不一致性
+            semantic_spatial_inconsistency = torch.abs(curr_feat_sim - poi_sim_norm[:N, :N])
+            spatial_semantic_inconsistency = torch.abs(curr_feat_sim - dist_norm[:N, :N])
+            
+            # 合并两种不一致性
+            inconsistency = semantic_spatial_inconsistency + spatial_semantic_inconsistency
+            
+            # 归一化不一致性到[0,1]区间
+            inconsistency = (inconsistency - inconsistency.min()) / (inconsistency.max() - inconsistency.min() + 1e-8)
+            
+            # 使用贝塔分布估计真负样本概率
+            alpha = F.softplus(self.beta_params[0])  # [2]
+            beta = F.softplus(self.beta_params[1])   # [2]
+            
+            # 为每个不一致性值创建对应的Beta分布
+            alpha = alpha.unsqueeze(0).unsqueeze(0)  # [1, 1, 2]
+            beta = beta.unsqueeze(0).unsqueeze(0)    # [1, 1, 2]
+            
+            # 将inconsistency扩展为3维
+            inconsistency = inconsistency.unsqueeze(-1)  # [N, N, 1]
+            
+            # 创建Beta分布
+            beta_dist = torch.distributions.Beta(
+                alpha.expand(N, N, 2),  # 扩展到[N, N, 2]
+                beta.expand(N, N, 2)    # 扩展到[N, N, 2]
+            )
+            
+            # 计算PDF值
+            pdf_values = beta_dist.log_prob(inconsistency).exp()  # [N, N, 2]
+            
+            # 对两个分布的结果取平均
+            pdf_values = pdf_values.mean(dim=-1)  # [N, N]
+            
+            # 归一化PDF值
+            true_negative_prob = pdf_values / (pdf_values.max() + 1e-8)
+            
+            # 生成困难负样本掩码
+            mask[b] = (true_negative_prob > 0.5).float()
+            
+            # 将对角线设为0（排除自身）
+            mask[b].fill_diagonal_(0)
+        
+        return mask
+
     def forward(self, z):
         """Compute the contrastive loss of batched data.
-        :param z1, z2 (tensor): shape nlvc (batch, seq_len, node, dim)
-        :param loss: contrastive loss
+        Args:
+            z: 节点特征 [B, N, T, D] 或 [B, N, D]
+        Returns:
+            z: 更新后的特征
+            l: 对比损失
         """
+        # 确保输入维度正确
+        if len(z.shape) == 4:
+            B, N, T, D = z.shape
+            # 将时间维度压缩到特征维度
+            z = z.reshape(B, N, -1)  # [B, N, T*D]
+        
         with torch.no_grad():
             w = self.prototypes.weight.data.clone()
             w = self.l2norm(w)
             self.prototypes.weight.copy_(w)
 
-        # l2norm avoids nan of Q in sinkhorn
-        self.zc = self.prototypes(self.l2norm(z.reshape(
-            -1, self.d_model)))  # nd -> nk, assignment q, embedding z
+        # 计算困难负样本掩码
+        hard_negative_mask = self.compute_hard_negative_mask(z)
+        
+        # 特征归一化
+        z_norm = self.l2norm(z.reshape(-1, z.shape[-1]))  # [B*N, D]
+        
+        # 计算原型分配
+        self.zc = self.prototypes(z_norm)  # [B*N, K]
+        
+        # 使用Sinkhorn算法计算软分配
         with torch.no_grad():
             q = sinkhorn(self.zc.detach())
-        l = -torch.mean(
-            torch.sum(q * F.log_softmax(self.zc / self.tau, dim=1), dim=1))
+            
+        # 计算对比损失
+        if hard_negative_mask is not None:
+            # 确保掩码维度与zc匹配
+            hard_negative_mask = hard_negative_mask.reshape(-1)  # [B*N]
+            hard_negative_mask = hard_negative_mask[:self.zc.size(0)]  # 截取到相同长度
+            hard_negative_mask = hard_negative_mask.unsqueeze(1)  # [B*N, 1]
+            
+            # 应用困难负样本掩码
+            masked_zc = self.zc * hard_negative_mask
+            l = -torch.mean(torch.sum(q * F.log_softmax(masked_zc / self.tau, dim=1), dim=1))
+        else:
+            l = -torch.mean(torch.sum(q * F.log_softmax(self.zc / self.tau, dim=1), dim=1))
+            
         return z, l
 
 
