@@ -1,3 +1,5 @@
+import sys
+sys.stdout.reconfigure(line_buffering=True)
 import numpy as np
 from STAnomalyFormer.interface.utils import recall_k
 from data.load_nyc import load_dataset
@@ -284,16 +286,16 @@ for t in range(args.repeat):
     for i in range(n_patches):
         start_idx = i * args.stride
         # 打印每一步的维度信息
-        print(f"\n处理第 {i} 个patch:")
-        print(f"1. anomaly_mask[:, i] shape: {anomaly_mask[:, i].shape}")
+        #print(f"\n处理第 {i} 个patch:")
+        #print(f"1. anomaly_mask[:, i] shape: {anomaly_mask[:, i].shape}")
         
         # 将每个patch的异常掩码压缩到节点级别
         patch_mask = np.any(anomaly_mask[:, i], axis=(1, 2))  # [263]
-        print(f"2. patch_mask shape: {patch_mask.shape}")
+        #print(f"2. patch_mask shape: {patch_mask.shape}")
         
         # 扩展到正确的维度
         expanded_mask = np.tile(patch_mask[:, np.newaxis], (1, 14))  # [263, 14]
-        print(f"3. expanded_mask shape: {expanded_mask.shape}")
+       # print(f"3. expanded_mask shape: {expanded_mask.shape}")
         
         # 对每个patch的时间段进行赋值
         for j in range(args.patch_len):
@@ -427,34 +429,21 @@ for t in range(args.repeat):
         print(f"4. region_scores转换后维度: {region_scores.shape}")
         print(f"5. time_scores转换后维度: {time_scores.shape}")
         
-        # 使用最近邻插值将分数扩展到144个时间步
-        for i in range(263):
-            try:
-                # 获取当前区域的时间序列
-                region_series = region_scores[i]  # [T]
-                time_series = time_scores[i]      # [T]
-                
-                # 确保是一维数组
-                if len(region_series.shape) > 1:
-                    region_series = region_series[:, 0]  # 取第一个通道
-                if len(time_series.shape) > 1:
-                    time_series = time_series[:, 0]  # 取第一个通道
-                
-                # 创建插值点
-                x_old = np.linspace(0, 143, len(region_series))
-                x_new = np.arange(144)
-                
-                # 执行插值
-                region_scores_full[i] = np.interp(x_new, x_old, region_series)
-                time_scores_full[i] = np.interp(x_new, x_old, time_series)
-                
-            except Exception as e:
-                print(f"处理第{i}个样本时出错:")
-                print(f"region_series形状: {region_series.shape}")
-                print(f"time_series形状: {time_series.shape}")
-                print(f"x_old形状: {x_old.shape}")
-                print(f"x_new形状: {x_new.shape}")
-                raise e
+        # 将region_scores和time_scores转换为正确的形状
+        region_scores = region_scores.reshape(region_scores.shape[0], -1)
+        time_scores = time_scores.reshape(time_scores.shape[0], -1)
+        
+        # 创建插值用的x轴
+        x_old = np.arange(region_scores.shape[1])
+        x_new = np.arange(144)
+        
+        # 对每个样本进行插值
+        region_scores_full = np.zeros((region_scores.shape[0], 144))
+        time_scores_full = np.zeros((time_scores.shape[0], 144))
+        
+        for i in range(region_scores.shape[0]):
+            region_scores_full[i] = np.interp(x_new, x_old, region_scores[i])
+            time_scores_full[i] = np.interp(x_new, x_old, time_scores[i])
         
         print(f"6. region_scores_full维度: {region_scores_full.shape}")
         print(f"7. time_scores_full维度: {time_scores_full.shape}")
