@@ -750,33 +750,180 @@ class STPatchFormer(nn.Module):
         self.revin = RevIN(c_in)
         
     def forward(self, x):
-        """
-        前向传播
-        Args:
-            x: 输入张量，形状为 [batch_size, seq_len, input_dim]
-        Returns:
-            重构后的张量，形状为 [batch_size, seq_len, input_dim]
-        """
-        # 打印输入形状
-        print(f"输入形状: {x.shape}")
+        print(f"\n前向传播维度追踪:")
+        print(f"1. 输入数据维度: {x.shape}")
         
-        # 输入投影
-        x = self.input_projection(x)
-        print(f"投影后形状: {x.shape}")
+        # 1. 分片处理
+        patch_x = self.patch(x)  # [bs, num_patch, n_vars, patch_len]
+        print(f"2. 分片后维度: {patch_x.shape}")
         
-        # 空间Transformer处理
-        spatial_out = self.spatial_transformer(x)
-        print(f"空间Transformer输出形状: {spatial_out.shape}")
+        # 2. 数据归一化
+        x = self.revin(patch_x.transpose(2, 3), 'norm').transpose(2, 3)
+        print(f"3. 归一化后维度: {x.shape}")
         
-        # 时间Transformer处理
-        temporal_out = self.temporal_transformer(spatial_out)
-        print(f"时间Transformer输出形状: {temporal_out.shape}")
+        # 3. 分片编码
+        z = self.patch_tsfm(x)  # [bs, n_vars, num_patch, d_model]
+        print(f"4. 编码后维度: {z.shape}")
         
-        # 输出投影
-        output = self.output_projection(temporal_out)
-        print(f"最终输出形状: {output.shape}")
+        # 4. 输出投影
+        z = self.output_proj(z)  # [bs, n_vars, num_patch, c_in]
+        print(f"5. 投影后维度: {z.shape}")
         
-        return output
+        # 5. 还原到原始维度
+        bs, n_vars, num_patch, c_in = z.shape
+        z = z.transpose(1, 2)  # [bs, num_patch, n_vars, c_in]
+        print(f"6. 维度重排后: {z.shape}")
+        
+        # 6. 还原分片
+        z = z.reshape(bs, -1, n_vars)  # [bs, num_patch*c_in, n_vars]
+        print(f"7. 还原分片后: {z.shape}")
+        z = z[:, :self.seq_len, :]  # 截取到原始序列长度
+        print(f"8. 截取长度后: {z.shape}")
+        
+        # 7. 反归一化
+        z = self.revin(z, 'denorm')
+        print(f"9. 最终输出维度: {z.shape}")
+        
+        # 确保z的维度正确
+        if len(z.shape) == 4:  # 如果z是[bs, bs, seq_len, n_vars]
+            z = z[0]  # 取第一个batch的预测结果
+        elif len(z.shape) == 3 and z.shape[0] == bs * bs:  # 如果z是[bs*bs, seq_len, n_vars]
+            z = z[:bs]  # 只取前bs个样本
+
+        print(f"9.1 调整后z维度: {z.shape}")
+
+        # 确保z和x的维度匹配
+        if z.shape != x.shape:
+            print(f"警告：z和x维度不匹配，进行调整")
+            print(f"z维度: {z.shape}")
+            print(f"x维度: {x.shape}")
+            
+            # 将x重塑为与z相同的维度
+            x_reshaped = x.reshape(bs, -1, n_vars)  # [bs, seq_len, n_vars]
+            x_reshaped = x_reshaped[:, :self.seq_len, :]  # 截取到原始序列长度
+            
+            # 确保z和x_reshaped的维度匹配
+            if z.shape != x_reshaped.shape:
+                z = z[:x_reshaped.shape[0], :x_reshaped.shape[1], :x_reshaped.shape[2]]
+            
+            print(f"调整后z维度: {z.shape}")
+            print(f"调整后x维度: {x_reshaped.shape}")
+            
+            # 使用调整后的维度计算损失
+            if return_dict:
+                print("\n异常分数计算维度追踪:")
+                # 计算异常分数
+                print(f"10. x_reshaped维度: {x_reshaped.shape}")
+                print(f"11. z维度: {z.shape}")
+                
+                # 计算重建损失
+                recon_loss = self.criterion(z, x_reshaped)
+                
+                # 在训练模式下进行对抗训练
+                if original_training:  # 使用保存的原始训练状态
+                    print("\n=== 开始计算对抗对比损失 ===")
+                    print("时间掩码分支输出维度:", self.mask.time_encoder_output.shape)
+                    print("频率掩码分支输出维度:", self.mask.freq_encoder_output.shape)
+                    
+                    # 检查特征是否存在
+                    if not hasattr(self.mask, 'time_encoder_output') or not hasattr(self.mask, 'freq_encoder_output'):
+                        print("错误：掩码分支输出不存在！")
+                        return None
+                    
+                    # 获取特征
+                    time_feat = self.mask.time_encoder_output  # [bs, num_patch, n_vars, d_model]
+                    freq_feat = self.mask.freq_encoder_output  # [bs, num_patch, n_vars, d_model]
+                    
+                    print(f"\n特征提取调试信息:")
+                    print(f"1. 原始特征维度:")
+                    print(f"   时间特征: {time_feat.shape}")
+                    print(f"   频率特征: {freq_feat.shape}")
+                    
+                    # 调整维度顺序
+                    time_feat = time_feat.permute(0, 2, 1, 3)  # [bs, n_vars, num_patch, d_model]
+                    freq_feat = freq_feat.permute(0, 2, 1, 3)  # [bs, n_vars, num_patch, d_model]
+                    
+                    # 重塑为正确的维度
+                    bs, n_vars, num_patch, d_model = time_feat.shape
+                    time_feat = time_feat.reshape(bs * n_vars, num_patch, d_model)  # [bs*n_vars, num_patch, d_model]
+                    freq_feat = freq_feat.reshape(bs * n_vars, num_patch, d_model)  # [bs*n_vars, num_patch, d_model]
+                    
+                    print(f"\n2. 调整后特征维度:")
+                    print(f"   时间特征: {time_feat.shape}")
+                    print(f"   频率特征: {freq_feat.shape}")
+                    
+                    try:
+                        # L2归一化
+                        time_feat = F.normalize(time_feat, p=2, dim=-1)
+                        freq_feat = F.normalize(freq_feat, p=2, dim=-1)
+                        
+                        print("\n3. 开始计算对比损失...")
+                        print(f"归一化后的特征:")
+                        print(f"时间特征范数: {torch.norm(time_feat, p=2, dim=-1).mean().item():.4f}")
+                        print(f"频率特征范数: {torch.norm(freq_feat, p=2, dim=-1).mean().item():.4f}")
+                        
+                        # 检查特征是否包含NaN或Inf
+                        if torch.isnan(time_feat).any() or torch.isinf(time_feat).any():
+                            print("警告：时间特征包含NaN或Inf值")
+                            time_feat = torch.nan_to_num(time_feat, nan=0.0, posinf=1.0, neginf=-1.0)
+                        
+                        if torch.isnan(freq_feat).any() or torch.isinf(freq_feat).any():
+                            print("警告：频率特征包含NaN或Inf值")
+                            freq_feat = torch.nan_to_num(freq_feat, nan=0.0, posinf=1.0, neginf=-1.0)
+                        
+                        # 将特征转换为列表形式
+                        time_feat_list = [time_feat]
+                        freq_feat_list = [freq_feat]
+                        
+                        # 使用compute_adversarial_contrastive_loss
+                        total_loss, adv_loss, con_loss = compute_adversarial_contrastive_loss(
+                            time_feat_list,
+                            freq_feat_list,
+                            temperature=50.0
+                        )
+                        
+                        print(f"\n4. 损失计算结果:")
+                        print(f"   对抗损失: {adv_loss.item():.4f}")
+                        print(f"   对比损失: {con_loss.item():.4f}")
+                        print(f"   总损失: {total_loss.item():.4f}")
+                        
+                    except Exception as e:
+                        print(f"\n错误：计算过程中出现异常: {str(e)}")
+                        print(f"错误类型: {type(e).__name__}")
+                        import traceback
+                        print(f"错误堆栈: {traceback.format_exc()}")
+                        total_loss = torch.tensor(0.0, device=time_feat.device)
+                    
+                    # 将对比损失添加到总损失中
+                    recon_loss = recon_loss + total_loss
+                
+                # 计算异常分数
+                anomaly_scores = torch.abs(z - x_reshaped)  # [bs, seq_len, n_vars]
+                print(f"12. anomaly_scores维度: {anomaly_scores.shape}")
+                
+                # 分离时间和空间异常分数
+                region_scores = anomaly_scores.mean(dim=1)  # [bs, n_vars]
+                time_scores = anomaly_scores.mean(dim=2)    # [bs, seq_len]
+                print(f"13. region_scores维度: {region_scores.shape}")
+                print(f"14. time_scores维度: {time_scores.shape}")
+                
+                # 调整维度以匹配
+                region_scores = region_scores.unsqueeze(1).expand(-1, self.seq_len, -1)
+                time_scores = time_scores.unsqueeze(-1).expand(-1, -1, n_vars)
+                
+                # 组合异常分数
+                anomaly_scores = torch.stack([region_scores, time_scores], dim=-1)
+                print(f"15. 最终异常分数维度: {anomaly_scores.shape}")
+                
+                return {
+                    'reconstruction': z,
+                    'anomaly_scores': anomaly_scores,
+                    'recon_loss': recon_loss,
+                    'region_features': region_features,
+                    'spatial_features': spatial_features
+                }
+        
+        return z
 
 
 class STPatchMaskFormer(STPatchFormer):
@@ -787,49 +934,6 @@ class STPatchMaskFormer(STPatchFormer):
                  poi_sim=None, dist_mat=None):
         super().__init__(c_in, seq_len, patch_len, stride, max_seq_len, n_layers, d_model, n_heads, d_ff,
                         shared_embedding, attn_dropout, dropout, act)
-        
-        # 初始化掩码模块
-        self.time_freq_masking = TimeFreqMasking(
-            mask_ratio=mask_ratio,
-            time_ratio=time_ratio,
-            freq_ratio=freq_ratio,
-            patch_size=patch_size
-        )
-        
-        # 初始化异常检测器
-        self.anomaly_detector = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, 1)
-        )
-        
-        # 初始化区域检测器
-        self.region_detector = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, 1)
-        )
-        
-        # 初始化时间检测器
-        self.time_detector = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, 1)
-        )
-        
-        # 添加输出投影层
-        self.output_projection = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, c_in)
-        )
-        
-        # 其他初始化代码保持不变
-        self.n_clusters = n_clusters
-        self.temperature = temperature
-        self.n_gcn = n_gcn
-        self.poi_sim = poi_sim
-        self.dist_mat = dist_mat
         
         # 初始化num_patch属性
         self.num_patch = (max(seq_len, patch_len) - patch_len) // stride + 1
@@ -997,18 +1101,11 @@ class STPatchMaskFormer(STPatchFormer):
         # 计算重建损失
         recon_loss = F.mse_loss(z, x_reshaped)
 
-            # 计算异常分数
-        anomaly_scores = self.anomaly_detector(z)  # [bs, seq_len, d_model]
-        region_scores = self.region_detector(z)  # [bs, d_model]
-        time_scores = self.time_detector(x)  # [bs, seq_len]
-        
-        # 调整维度以匹配
-        region_scores = region_scores.unsqueeze(1).unsqueeze(2)  # [bs, 1, 1, d_model]
-        time_scores = time_scores.unsqueeze(-1)  # [bs, seq_len, 1]
-        
-        # 计算最终的异常分数
-        final_scores = region_scores * time_scores  # [bs, seq_len, d_model]
-        
+        # 计算异常分数
+        anomaly_scores = torch.abs(z - x_reshaped)
+        region_scores = anomaly_scores.mean(dim=1)
+        time_scores = anomaly_scores.mean(dim=2)
+
         print("\n准备检查original_training条件")
         print(f"1. original_training值: {original_training}")
         print(f"2. 当前模型状态: {self.training}")
@@ -1034,7 +1131,7 @@ class STPatchMaskFormer(STPatchFormer):
             time_features = [time_encoder_output] if time_encoder_output is not None else []
             freq_features = [freq_encoder_output] if freq_encoder_output is not None else []
             
-                # 计算对抗对比损失
+            # 计算对抗对比损失
             total_loss, adv_loss, con_loss = compute_adversarial_contrastive_loss(
                 time_features, freq_features
             )
@@ -1055,72 +1152,111 @@ class STPatchMaskFormer(STPatchFormer):
         print(f"   region_scores维度: {region_scores.shape}")
         print(f"   time_scores维度: {time_scores.shape}")
             
+        # 组合异常分数
+        final_anomaly_scores = torch.stack([
+            region_scores.unsqueeze(-1).expand(-1, -1, time_scores.shape[1], -1),
+            time_scores.unsqueeze(-1).expand(-1, -1, region_scores.shape[1], -1)
+        ], dim=-1)
+        print(f"   最终异常分数维度: {final_anomaly_scores.shape}")
+            
         print("\n=== forward方法结束 ===")
         print(f"1. 最终模型状态: {self.training}")
         print(f"2. 最终模型模式: {'训练模式' if self.training else '评估模式'}")
 
         if return_dict:
             return {
-                'z': z,
-                'x': x,
-                'time_encoder_output': time_encoder_output,
-                'freq_encoder_output': freq_encoder_output,
-                'anomaly_scores': final_scores,
-                'region_scores': region_scores,
-                'time_scores': time_scores
+                'reconstruction': z,
+                'anomaly_scores': final_anomaly_scores,
+                'recon_loss': recon_loss
             }
         else:
-            return self.output_projection(z)
+            return z
 
     def evaluate(self, x, y_true):
-        """评估模型性能"""
+        """
+        评估模型性能
+        Args:
+            x: 输入数据 [N, T, D]
+            y_true: 真实标签 [N, T, D, 2]
+        Returns:
+            metrics: 评估指标字典
+        """
         self.eval()
         with torch.no_grad():
+            print("\n=== 评估阶段详细调试信息 ===")
+            print(f"1. 输入数据维度:")
+            print(f"   x: {x.shape}")
+            print(f"   y_true: {y_true.shape}")
+            
             # 获取模型输出
             output_dict = self(x, return_dict=True)
-            anomaly_scores = output_dict['anomaly_scores']  # [N, T, 2]
-            region_scores = anomaly_scores[:, :, 0]        # [N, T]
-            time_scores = anomaly_scores[:, :, 1]          # [N, T]
             
-            # 转换为numpy数组
+            # 获取异常分数
+            anomaly_scores = output_dict['anomaly_scores']  # [N, T, D, 2]
+            region_scores = anomaly_scores[:, :, :, 0]     # [N, T, D]
+            time_scores = anomaly_scores[:, :, :, 1]       # [N, T, D]
+            
+            print(f"\n2. 模型输出维度:")
+            print(f"   anomaly_scores: {anomaly_scores.shape}")
+            print(f"   region_scores: {region_scores.shape}")
+            print(f"   time_scores: {time_scores.shape}")
+            
+            # 将张量移动到CPU并转换为numpy数组
             y_true = y_true.cpu().numpy()
             region_scores = region_scores.cpu().numpy()
             time_scores = time_scores.cpu().numpy()
             
-            # 调整维度以匹配
+            print(f"\n3. 转换为numpy后的维度:")
+            print(f"   y_true: {y_true.shape}")
+            print(f"   region_scores: {region_scores.shape}")
+            print(f"   time_scores: {time_scores.shape}")
+            
+            # 确保维度匹配
             y_true_region = y_true[:, :, :, 0]  # [N, T, D]
             y_true_time = y_true[:, :, :, 1]    # [N, T, D]
             
-            # 确保region_scores和time_scores的维度与y_true匹配
-            region_scores = region_scores.reshape(region_scores.shape[0], -1)  # [N, T*D]
-            time_scores = time_scores.reshape(time_scores.shape[0], -1)        # [N, T*D]
+            print(f"\n4. 调整维度后:")
+            print(f"   y_true_region: {y_true_region.shape}")
+            print(f"   region_scores: {region_scores.shape}")
+            print(f"   y_true_time: {y_true_time.shape}")
+            print(f"   time_scores: {time_scores.shape}")
             
-            # 展平所有数组
+            try:
+                # 展平数组以计算AUC
                 y_true_region_flat = y_true_region.reshape(-1)
                 region_scores_flat = region_scores.reshape(-1)
                 y_true_time_flat = y_true_time.reshape(-1)
                 time_scores_flat = time_scores.reshape(-1)
                 
-            # 确保所有数组长度相同
-            min_length = min(len(y_true_region_flat), len(region_scores_flat))
-            y_true_region_flat = y_true_region_flat[:min_length]
-            region_scores_flat = region_scores_flat[:min_length]
-            y_true_time_flat = y_true_time_flat[:min_length]
-            time_scores_flat = time_scores_flat[:min_length]
-            
-            # 计算AUC
-            try:
+                print(f"\n5. 展平后维度:")
+                print(f"   y_true_region_flat: {y_true_region_flat.shape}")
+                print(f"   region_scores_flat: {region_scores_flat.shape}")
+                print(f"   y_true_time_flat: {y_true_time_flat.shape}")
+                print(f"   time_scores_flat: {time_scores_flat.shape}")
+                
+                # 打印一些样本值以验证数据
+                print(f"\n6. 数据样本:")
+                print(f"   y_true_region_flat前5个值: {y_true_region_flat[:5]}")
+                print(f"   region_scores_flat前5个值: {region_scores_flat[:5]}")
+                print(f"   y_true_time_flat前5个值: {y_true_time_flat[:5]}")
+                print(f"   time_scores_flat前5个值: {time_scores_flat[:5]}")
+                
+                # 计算AUC分数
                 region_auc = roc_auc_score(y_true_region_flat, region_scores_flat)
                 time_auc = roc_auc_score(y_true_time_flat, time_scores_flat)
-            except Exception as e:
-                print(f"计算AUC时出错: {str(e)}")
-                print(f"y_true_region_flat长度: {len(y_true_region_flat)}")
-                print(f"region_scores_flat长度: {len(region_scores_flat)}")
-                print(f"y_true_time_flat长度: {len(y_true_time_flat)}")
-                print(f"time_scores_flat长度: {len(time_scores_flat)}")
-                raise e
+                
+                print(f"\n7. AUC分数:")
+                print(f"   region_auc: {region_auc:.4f}")
+                print(f"   time_auc: {time_auc:.4f}")
                 
                 return {
                     'region_auc': region_auc,
                     'time_auc': time_auc
                 }
+            except Exception as e:
+                print(f"\n计算AUC时出错: {str(e)}")
+                print(f"y_true_region_flat唯一值: {np.unique(y_true_region_flat)}")
+                print(f"region_scores_flat唯一值: {np.unique(region_scores_flat)}")
+                print(f"y_true_time_flat唯一值: {np.unique(y_true_time_flat)}")
+                print(f"time_scores_flat唯一值: {np.unique(time_scores_flat)}")
+                raise e

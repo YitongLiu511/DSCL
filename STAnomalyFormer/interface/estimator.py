@@ -9,6 +9,7 @@ from typing import Union, List, Tuple, Literal
 from copy import deepcopy
 from tqdm import tqdm
 import numpy as np
+import torch.optim as optim
 
 from ..model.module import SpatialTSFM, TemporalTSFM
 from ..model.baseline import DOMINANT, AnomalyDAE, GCN, LSTMAE
@@ -925,6 +926,14 @@ class STAnomalyFormerDetector_v1(BaseDetector):
         Returns:
             self
         """
+        print("\n" + "="*50)
+        print("训练开始前的状态检查:")
+        print(f"1. 模型是否存在: {hasattr(self, 'model')}")
+        if hasattr(self, 'model'):
+            print(f"2. 模型训练状态: {self.model.training}")
+            print(f"3. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+        print("="*50 + "\n")
+        
         # 数据预处理
         if isinstance(x, np.ndarray):
             x_ = torch.FloatTensor(x).to(self.device)
@@ -954,28 +963,74 @@ class STAnomalyFormerDetector_v1(BaseDetector):
         # 初始化模型
         self.model = STPatch_MGCNFormer(**self.model_args).to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        
+
         # 训练循环
         process = range(self.epoch) if not self.verbose else tqdm(range(self.epoch))
         for epoch in process:
-            # 训练阶段
-            self.model.train()
-            output_dict = self.model(x_, return_dict=True)
-            (patch_x, patch_recon), (score_dy, score_st) = output_dict['reconstruction'], output_dict['attention']
+            print(f"\n{'='*20} Epoch {epoch} {'='*20}")
             
-            # 计算损失
-            recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))
-            discrepancy = sym_kl_loss(score_dy, score_st)
-            loss = recon.mean() + discrepancy.mean()
+            # 训练阶段
+            print("\n=== 训练阶段开始 ===")
+            print("训练阶段开始前的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            
+            # 确保模型处于训练模式
+            self.model.train()
+            print("\n设置train()后的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            
+            # 前向传播，确保设置return_dict=True
+            print("\n前向传播前的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            
+            # 保存原始训练状态
+            original_training = self.model.training
+            print(f"3. original_training值: {original_training}")
+            
+            # 确保模型处于训练模式
+            self.model.train()
+            
+            # 前向传播
+            output_dict = self.model(x_, return_dict=True)
+            print("\n前向传播后的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            print(f"3. 输出字典键: {output_dict.keys()}")
+            
+            # 从输出字典中获取重建结果和异常分数
+            reconstruction = output_dict['reconstruction']
+            anomaly_scores = output_dict['anomaly_scores']
+            recon_loss = output_dict['recon_loss']
+            
+            # 计算总损失
+            loss = recon_loss
             
             # 优化
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             
+            print("\n优化后的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            print(f"3. 当前损失值: {loss.item():.6f}")
+            
             # 评估阶段
             if evaluate is not None:
+                print("\n=== 评估阶段开始 ===")
+                print("评估前的状态检查:")
+                print(f"1. 模型训练状态: {self.model.training}")
+                print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+                
+                # 确保模型处于评估模式
                 self.model.eval()
+                print("\n设置eval()后的状态检查:")
+                print(f"1. 模型训练状态: {self.model.training}")
+                print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+                
                 with torch.no_grad():
                     # 处理评估数据
                     if isinstance(evaluate[0], np.ndarray):
@@ -994,6 +1049,14 @@ class STAnomalyFormerDetector_v1(BaseDetector):
                             print("触发早停机制")
                         break
                 
+                print("\n评估后的状态检查:")
+                print(f"1. 模型训练状态: {self.model.training}")
+                print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+                print(f"3. 评估指标:")
+                print(f"   - 区域AUC: {metrics['region_auc']:.3f}")
+                print(f"   - 时间AUC: {metrics['time_auc']:.3f}")
+                print(f"   - 综合AUC: {metrics['combined_auc']:.3f}")
+                
                 # 更新进度条
                 if self.verbose:
                     process.set_postfix(
@@ -1005,22 +1068,37 @@ class STAnomalyFormerDetector_v1(BaseDetector):
             else:
                 if self.verbose:
                     process.set_postfix(loss=f"{loss.item():.5f}", refresh=True)
+            
+            # 确保模型在下一个epoch开始时处于训练模式
+            self.model.train()
         
         # 加载最佳模型
         if evaluate is not None:
+            print("\n=== 加载最佳模型 ===")
+            print("加载前的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            
             self.model.load_state_dict(torch.load(self.early_stopping.path))
+            
+            print("\n加载后的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
         
         # 计算最终决策分数
+        print("\n=== 计算最终决策分数 ===")
+        print("计算前的状态检查:")
+        print(f"1. 模型训练状态: {self.model.training}")
+        print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+        
+        # 确保模型处于评估模式
         self.model.eval()
         output_dict = self.decision_function(x, return_dict=True)
         self.decision_scores_ = output_dict['anomaly_scores']
         
-        # 计算标签和阈值
-        self.labels_, self.threshold_ = predict_by_score(
-            self.decision_scores_.flatten(),
-            self.contamination,
-            True
-        )
+        print("\n训练结束时的状态检查:")
+        print(f"1. 模型训练状态: {self.model.training}")
+        print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
         
         return self
 
@@ -1455,6 +1533,14 @@ class STAnomalyFormerDetector_v4(STAnomalyFormerDetector_v3):
         Returns:
             self
         """
+        print("\n" + "="*50)
+        print("训练开始前的状态检查:")
+        print(f"1. 模型是否存在: {hasattr(self, 'model')}")
+        if hasattr(self, 'model'):
+            print(f"2. 模型训练状态: {self.model.training}")
+            print(f"3. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+        print("="*50 + "\n")
+        
         # 数据预处理
         if isinstance(x, np.ndarray):
             x_ = torch.FloatTensor(x).to(self.device)
@@ -1488,31 +1574,77 @@ class STAnomalyFormerDetector_v4(STAnomalyFormerDetector_v3):
         # 训练循环
         process = range(self.epoch) if not self.verbose else tqdm(range(self.epoch))
         for epoch in process:
-            # 训练阶段
-            self.model.train()
-            output_dict = self.model(x_, return_dict=True)
-            (patch_x, patch_recon), (score_dy, score_st) = output_dict['reconstruction'], output_dict['attention']
+            print(f"\n{'='*20} Epoch {epoch} {'='*20}")
             
-            # 计算损失
-            recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))
-            discrepancy = sym_kl_loss(score_dy, score_st)
-            loss = recon.mean() + discrepancy.mean()
+            # 训练阶段
+            print("\n=== 训练阶段开始 ===")
+            print("训练阶段开始前的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            
+            # 确保模型处于训练模式
+            self.model.train()
+            print("\n设置train()后的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            
+            # 前向传播，确保设置return_dict=True
+            print("\n前向传播前的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            
+            # 保存原始训练状态
+            original_training = self.model.training
+            print(f"3. original_training值: {original_training}")
+            
+            # 确保模型处于训练模式
+            self.model.train()
+            
+            # 前向传播
+            output_dict = self.model(x_, return_dict=True)
+            print("\n前向传播后的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            print(f"3. 输出字典键: {output_dict.keys()}")
+            
+            # 从输出字典中获取重建结果和异常分数
+            reconstruction = output_dict['reconstruction']
+            anomaly_scores = output_dict['anomaly_scores']
+            recon_loss = output_dict['recon_loss']
+            
+            # 计算总损失
+            loss = recon_loss
             
             # 优化
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-
+            
+            print("\n优化后的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            print(f"3. 当前损失值: {loss.item():.6f}")
+            
             # 评估阶段
             if evaluate is not None:
+                print("\n=== 评估阶段开始 ===")
+                print("评估前的状态检查:")
+                print(f"1. 模型训练状态: {self.model.training}")
+                print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+                
+                # 确保模型处于评估模式
                 self.model.eval()
+                print("\n设置eval()后的状态检查:")
+                print(f"1. 模型训练状态: {self.model.training}")
+                print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+                
                 with torch.no_grad():
                     # 处理评估数据
                     if isinstance(evaluate[0], np.ndarray):
                         eval_x = torch.FloatTensor(evaluate[0]).to(self.device)
                     else:
                         eval_x = evaluate[0].to(self.device)
-                        
+                    
                     # 获取评估结果
                     metrics = self.evaluate(eval_x, evaluate[1])
                     auc = (metrics['region_auc'] + metrics['time_auc'] + metrics['combined_auc']) / 3
@@ -1523,7 +1655,15 @@ class STAnomalyFormerDetector_v4(STAnomalyFormerDetector_v3):
                         if self.verbose:
                             print("触发早停机制")
                         break
-
+                
+                print("\n评估后的状态检查:")
+                print(f"1. 模型训练状态: {self.model.training}")
+                print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+                print(f"3. 评估指标:")
+                print(f"   - 区域AUC: {metrics['region_auc']:.3f}")
+                print(f"   - 时间AUC: {metrics['time_auc']:.3f}")
+                print(f"   - 综合AUC: {metrics['combined_auc']:.3f}")
+                
                 # 更新进度条
                 if self.verbose:
                     process.set_postfix(
@@ -1535,22 +1675,37 @@ class STAnomalyFormerDetector_v4(STAnomalyFormerDetector_v3):
             else:
                 if self.verbose:
                     process.set_postfix(loss=f"{loss.item():.5f}", refresh=True)
+            
+            # 确保模型在下一个epoch开始时处于训练模式
+            self.model.train()
         
         # 加载最佳模型
         if evaluate is not None:
+            print("\n=== 加载最佳模型 ===")
+            print("加载前的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+            
             self.model.load_state_dict(torch.load(self.early_stopping.path))
             
+            print("\n加载后的状态检查:")
+            print(f"1. 模型训练状态: {self.model.training}")
+            print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+        
         # 计算最终决策分数
+        print("\n=== 计算最终决策分数 ===")
+        print("计算前的状态检查:")
+        print(f"1. 模型训练状态: {self.model.training}")
+        print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
+        
+        # 确保模型处于评估模式
         self.model.eval()
         output_dict = self.decision_function(x, return_dict=True)
         self.decision_scores_ = output_dict['anomaly_scores']
         
-        # 计算标签和阈值
-        self.labels_, self.threshold_ = predict_by_score(
-            self.decision_scores_.flatten(),
-            self.contamination,
-            True
-        )
+        print("\n训练结束时的状态检查:")
+        print(f"1. 模型训练状态: {self.model.training}")
+        print(f"2. 模型模式: {'训练模式' if self.model.training else '评估模式'}")
         
         return self
 
