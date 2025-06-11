@@ -1,60 +1,118 @@
-import pandas as pd
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
+import random
+import geopandas as gpd
+import sys
 import os
 
-def inject_temporal_anomaly(X, mu=0.5, anomaly_ratio=0.1):
-    """注入时间异常
-    Args:
-        X: 输入数据，形状为 (N, T, D)
-        mu: 流量限制阈值
-        anomaly_ratio: 异常区域比例
-    """
-    N, T, D = X.shape
-    n_anomaly = int(N * anomaly_ratio)
-    
-    # 随机选择区域
-    anomaly_regions = np.random.choice(N, n_anomaly, replace=False)
-    
-    # 对选中的区域注入异常
-    for n in anomaly_regions:
-        max_flow = np.max(X[n])
-        X[n] = np.minimum(X[n], mu * max_flow)
-    
-    return X, anomaly_regions
+# 添加项目根目录到Python路径
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from new_version.temporal_frequency_masking import TemporalFrequencyMasking
+from sklearn.preprocessing import MinMaxScaler
+from torch.utils.data import Dataset, DataLoader
+from new_version.temporal_attention import process_temporal_masked_data
 
-def inject_spatial_anomaly(X, k=0.1, anomaly_ratio=0.1):
-    """注入空间异常
-    Args:
-        X: 输入数据，形状为 (N, T, D)
-        k: 采样节点比例
-        anomaly_ratio: 异常区域比例
+def inject_anomalies(data, anomaly_ratio=0.1, random_seed=42):
     """
-    N, T, D = X.shape
-    n_anomaly = int(N * anomaly_ratio)
-    k_nodes = int(N * k)
+    注入异常：通过替换连续3个时间戳的片段
+    Args:
+        data: 形状为 (n_days, n_slots, n_zones) 的数据
+        anomaly_ratio: 异常比例，默认0.1
+        random_seed: 随机种子
+    Returns:
+        data_with_anomalies: 注入异常后的数据
+        anomaly_labels: 异常标签，1表示异常，0表示正常
+    """
+    np.random.seed(random_seed)
+    n_days, n_slots, n_zones = data.shape
+    data_with_anomalies = data.copy()
+    anomaly_labels = np.zeros_like(data)
     
-    # 随机选择区域
-    anomaly_regions = np.random.choice(N, n_anomaly, replace=False)
+    # 计算总数据点数
+    total_data_points = n_days * n_slots * n_zones
+    n_anomalies = int(total_data_points * anomaly_ratio)
+    print(f"\n=== 异常注入统计 ===")
+    print(f"区域数量: {n_zones}")
+    print(f"每天时间槽数: {n_slots}")
+    print(f"总天数: {n_days}")
+    print(f"总数据点数: {total_data_points}")
+    print(f"目标异常比例: {anomaly_ratio}")
+    print(f"需要注入的异常数据点数: {n_anomalies}")
     
-    # 对选中的区域注入异常
-    for n in anomaly_regions:
-        # 随机采样k个节点
-        sampled_nodes = np.random.choice(N, k_nodes, replace=False)
-        # 计算与当前节点的最大差异
-        max_diff = 0
-        max_diff_node = None
-        for i in sampled_nodes:
-            diff = np.linalg.norm(X[n] - X[i])
-            if diff > max_diff:
-                max_diff = diff
-                max_diff_node = i
-        # 替换流量
-        X[n] = X[max_diff_node]
+    # 计算k值（候选片段数）
+    k = int(np.sqrt(n_zones * (n_slots - 2)))
+    print(f"每个目标片段的候选片段数: {k}")
     
-    return X, anomaly_regions
+    # 记录已注入的异常数
+    injected_count = 0
+    
+    while injected_count < n_anomalies:
+        # 随机选择目标区域和时间起点
+        target_zone = np.random.randint(0, n_zones)
+        target_day = np.random.randint(0, n_days)
+        target_slot = np.random.randint(0, n_slots - 2)  # -2确保有3个连续时间戳
+        
+        # 如果这个片段已经被标记为异常，跳过
+        if np.any(anomaly_labels[target_day, target_slot:target_slot+3, target_zone] == 1):
+            continue
+            
+        # 获取目标片段
+        target_fragment = data[target_day, target_slot:target_slot+3, target_zone]
+        
+        # 生成候选片段
+        candidate_fragments = []
+        candidate_distances = []
+        
+        for _ in range(k):
+            # 随机选择候选区域和时间
+            candidate_zone = np.random.randint(0, n_zones)
+            candidate_day = np.random.randint(0, n_days)
+            candidate_slot = np.random.randint(0, n_slots - 2)
+    
+            # 获取候选片段
+            candidate_fragment = data[candidate_day, candidate_slot:candidate_slot+3, candidate_zone]
+            
+            # 计算与目标片段的距离
+            distance = np.linalg.norm(target_fragment - candidate_fragment)
+            candidate_fragments.append((candidate_day, candidate_slot, candidate_zone))
+            candidate_distances.append(distance)
+        
+        # 选择距离最大的候选片段
+        max_dist_idx = np.argmax(candidate_distances)
+        best_candidate = candidate_fragments[max_dist_idx]
+        
+        # 替换目标片段
+        data_with_anomalies[target_day, target_slot:target_slot+3, target_zone] = \
+            data[best_candidate[0], best_candidate[1]:best_candidate[1]+3, best_candidate[2]]
+        
+        # 标记异常
+        anomaly_labels[target_day, target_slot:target_slot+3, target_zone] = 1
+        
+        # 平滑过渡
+        if target_slot > 0:  # 前一个时间点
+            data_with_anomalies[target_day, target_slot, target_zone] = \
+                0.8 * data[target_day, target_slot, target_zone] + \
+                0.2 * data_with_anomalies[target_day, target_slot, target_zone]
+        
+        if target_slot < n_slots - 3:  # 后一个时间点
+            data_with_anomalies[target_day, target_slot+2, target_zone] = \
+                0.8 * data[target_day, target_slot+2, target_zone] + \
+                0.2 * data_with_anomalies[target_day, target_slot+2, target_zone]
+        
+        injected_count += 3  # 每次注入3个时间戳
+        
+        # 打印进度
+        if injected_count % 1000 == 0:
+            print(f"已注入异常数据点数: {injected_count}/{n_anomalies}")
+    
+    # 计算实际异常比例
+    actual_ratio = np.sum(anomaly_labels) / total_data_points
+    print(f"\n=== 异常注入完成 ===")
+    print(f"实际注入的异常数据点数: {np.sum(anomaly_labels)}")
+    print(f"实际异常比例: {actual_ratio:.4f}")
+    
+    return data_with_anomalies, anomaly_labels
 
 def load_dataset(args):
     """
@@ -63,9 +121,10 @@ def load_dataset(args):
         args: 参数字典或argparse.Namespace对象，包含所有参数
             normalize: 是否归一化数据
             n_day: 训练集天数
+            inject_anomaly: 是否注入异常
+            anomaly_ratio: 异常比例
     Returns:
         X: 训练数据
-        val_X: 验证数据
         test_X: 测试数据
         (adj, dist, poi_sim): 邻接矩阵、距离矩阵和POI相似度矩阵
         y: 标签
@@ -95,6 +154,9 @@ def load_dataset(args):
     # 转换时间戳
     df['pickup_datetime'] = pd.to_datetime(df['tpep_pickup_datetime'])
     
+    # 只保留2023年1月和2月的数据
+    df = df[(df['pickup_datetime'].dt.year == 2023) & (df['pickup_datetime'].dt.month.isin([1, 2]))]
+    
     # 按10分钟聚合数据，并确保时间槽对齐
     df['time_slot'] = df['pickup_datetime'].dt.floor('10min')
     df['day'] = df['pickup_datetime'].dt.date
@@ -102,13 +164,13 @@ def load_dataset(args):
     # 确保LocationID在有效范围内
     df = df[df['PULocationID'].isin(valid_zones) & df['DOLocationID'].isin(valid_zones)]
     print("过滤后数据形状:", df.shape)
-    
-    # 创建完整的时间槽索引
+     
+   # 创建完整的时间槽索引
     time_slots_per_day = 24 * 6  # 10分钟一个时间槽，每天144个时间槽
     all_days = sorted(df['day'].unique())
     
     # 计算每个区域的流量
-    flow_data = df.groupby(['day', 'time_slot', 'PULocationID']).size().unstack(fill_value=0)
+    flow_data = df.groupby(['day', 'time_slot', 'PULocationID']).size().unstack(fill_value=0.0)  # 使用0.0填充
     print("初始聚合后数据形状:", flow_data.shape)
     
     # 确保所有区域都存在，并且只包含有效区域
@@ -120,7 +182,7 @@ def load_dataset(args):
     
     # 添加缺失的区域
     for zone in missing_zones:
-        flow_data[zone] = 0
+        flow_data[zone] = 0.0  # 使用0.0填充
         
     # 移除多余的区域
     flow_data = flow_data[sorted(valid_zones)]
@@ -153,98 +215,127 @@ def load_dataset(args):
                 day_data,
                 on=['day', 'time_slot'],
                 how='left'
-            ).fillna(0)
+            ).fillna(0.0)  # 使用0.0填充
             complete_data.append(complete_day)
         else:
             complete_data.append(day_data)
     
-    # 合并所有天的数据
     flow_data = pd.concat(complete_data, ignore_index=True)
     print("处理后数据形状:", flow_data.shape)
     
-    # 使用min-max归一化
-    if isinstance(args, dict):
-        normalize = args.get('normalize', False)
-    else:
-        normalize = args.normalize
-        
-    if normalize:
-        scaler = MinMaxScaler()
-        flow_data.iloc[:, 2:] = scaler.fit_transform(flow_data.iloc[:, 2:])
-    
-    # 转换为numpy数组并重塑
+    # 转换为numpy数组
     flow_values = flow_data.iloc[:, 2:].values  # 只取数值列
     print("转换为numpy数组后形状:", flow_values.shape)
     
-    # 重塑数据为 (days, time_slots_per_day, n_zones)
+    # 重塑数据为 (n_days, time_slots_per_day, n_zones)
     n_days = len(all_days)
     flow_values = flow_values.reshape(n_days, time_slots_per_day, n_zones)
-    print("重塑后数据形状:", flow_values.shape)
+    print(f"重塑后数据形状: {flow_values.shape}")
     
-    # 按时间顺序划分数据集
-    if isinstance(args, dict):
-        train_size = args.get('n_day', 14)
-    else:
-        train_size = args.n_day
+    # 1. 划分训练集和测试集，各14天
+    n_train = 14  # 训练集14天
+    n_test = 14   # 测试集14天
+    
+    X = flow_values[:n_train]
+    test_X = flow_values[n_train:n_train+n_test]
+    
+    print(f"\n数据集划分:")
+    print(f"训练集形状: {X.shape}")
+    print(f"测试集形状: {test_X.shape}")
+    
+    # 2. 归一化
+    if args.normalize:
+        print("\n开始归一化...")
+        scaler = MinMaxScaler()
+        # 使用训练集拟合归一化参数
+        X_reshaped = X.reshape(-1, X.shape[-1])
+        X_normalized = scaler.fit_transform(X_reshaped)
+        X = X_normalized.reshape(X.shape)
+    
+        # 使用训练集的归一化参数转换测试集
+        test_X_reshaped = test_X.reshape(-1, test_X.shape[-1])
+        test_X = scaler.transform(test_X_reshaped).reshape(test_X.shape)
+        print("归一化完成")
+    
+    # 3. 在归一化后的训练集中注入异常
+    if args.inject_anomaly:
+        print("\n开始注入异常...")
+        X_with_anomalies, anomaly_labels = inject_anomalies(X, anomaly_ratio=args.anomaly_ratio)
         
-    val_size = train_size    # 验证集大小与训练集相同
-    test_size = train_size   # 测试集大小与训练集相同
+        # 保存异常标签
+        np.save('data/anomaly_labels.npy', anomaly_labels)
+        
+        # 更新训练集为注入异常后的数据
+        X = X_with_anomalies
     
-    # 确保有足够的数据
-    required_days = train_size + val_size + test_size
-    if n_days < required_days:
-        raise ValueError(f"数据天数不足，需要至少{required_days}天的数据，但只有{n_days}天")
+    # 应用时频掩蔽
+    print("\n=== 开始时频掩蔽处理 ===\n")
     
-    # 只使用前required_days天的数据
-    flow_values = flow_values[:required_days]
-    
-    # 注入时间异常
-    flow_values, temporal_anomalies = inject_temporal_anomaly(
-        flow_values.copy(), 
-        mu=0.5, 
-        anomaly_ratio=args.anormly_ratio
+    # 创建时频掩蔽模块
+    masking_module = TemporalFrequencyMasking(
+        window_size=10,  # 可以根据需要调整窗口大小
+        temporal_mask_ratio=0.1,
+        frequency_mask_ratio=0.1,
+        d_model=263  # 使用区域数量作为模型维度
     )
     
-    # 注入空间异常
-    flow_values, spatial_anomalies = inject_spatial_anomaly(
-        flow_values.copy(),
-        k=0.1,
-        anomaly_ratio=args.anormly_ratio
+    # 将数据转换为PyTorch张量
+    X_tensor = torch.FloatTensor(X)
+    test_X_tensor = torch.FloatTensor(test_X)
+    
+    print("处理训练集...")
+    temporal_masked_X, temporal_mask_indices = masking_module.temporal_masking(X_tensor)
+    frequency_masked_X, frequency_mask_indices = masking_module.frequency_masking(X_tensor)
+    print(f"训练集时间掩蔽位置数量: {temporal_mask_indices.shape[0] * temporal_mask_indices.shape[1]}")
+    print(f"训练集频率掩蔽位置数量: {frequency_mask_indices.shape[0] * frequency_mask_indices.shape[1]}")
+    
+    print("\n处理测试集...")
+    temporal_masked_test_X, temporal_mask_indices_test = masking_module.temporal_masking(test_X_tensor)
+    frequency_masked_test_X, frequency_mask_indices_test = masking_module.frequency_masking(test_X_tensor)
+    print(f"测试集时间掩蔽位置数量: {temporal_mask_indices_test.shape[0] * temporal_mask_indices_test.shape[1]}")
+    print(f"测试集频率掩蔽位置数量: {frequency_mask_indices_test.shape[0] * frequency_mask_indices_test.shape[1]}")
+    
+    # 将掩蔽后的数据转换为numpy数组
+    X = temporal_masked_X.cpu().detach().numpy()
+    test_X = temporal_masked_test_X.cpu().detach().numpy()
+    
+    # 添加时间注意力处理
+    print("\n=== 开始时间注意力处理 ===\n")
+    
+    print("处理训练集时间掩码数据...")
+    # 将numpy数组转回PyTorch张量
+    temporal_masked_X_tensor = torch.FloatTensor(X)
+    # 应用时间注意力处理
+    processed_X, train_attention_weights = process_temporal_masked_data(
+        temporal_masked_X_tensor,
+        d_model=263,  # 使用区域数量作为模型维度
+        nhead=8,
+        device='cuda' if torch.cuda.is_available() else 'cpu'
     )
+    print(f"训练集时间注意力处理完成，输出形状: {processed_X.shape}")
+    print(f"注意力权重数量: {len(train_attention_weights)}")
     
-    # 按时间顺序划分
-    X = flow_values[:train_size]
-    val_X = flow_values[train_size:train_size + val_size]
-    test_X = flow_values[train_size + val_size:train_size + val_size + test_size]
+    print("\n处理测试集时间掩码数据...")
+    temporal_masked_test_X_tensor = torch.FloatTensor(test_X)
+    processed_test_X, test_attention_weights = process_temporal_masked_data(
+        temporal_masked_test_X_tensor,
+        d_model=263,
+        nhead=8,
+        device='cuda' if torch.cuda.is_available() else 'cpu'
+    )
+    print(f"测试集时间注意力处理完成，输出形状: {processed_test_X.shape}")
+    print(f"注意力权重数量: {len(test_attention_weights)}")
     
-    # 生成标签（这里需要根据实际需求修改）
-    n_zones = adj.shape[0]  # 区域数量
-    n_time_slots = test_X.shape[1]  # 时间槽数量
-    y = np.zeros((n_zones, n_time_slots, 2))  # 初始化所有区域和时间槽为正常
-    
-    # 设置时间异常标签
-    for n in temporal_anomalies:
-        y[n, :, 0] = 1
-    
-    # 设置空间异常标签
-    for n in spatial_anomalies:
-        y[n, :, 1] = 1
-    
-    print(f"\n标签统计:")
-    print(f"总单元格数: {n_zones * n_time_slots}")
-    print(f"正常单元格数: {np.sum(y[:, :, 0] == 0)}")
-    print(f"异常单元格数: {np.sum(y[:, :, 1] == 1)}")
-    print(f"异常比例: {np.mean(y[:, :, 1] == 1) * 100:.2f}%")
-    print(f"每个区域的异常时间槽数量: {np.sum(y[:, :, 0], axis=1)}")
-    print(f"每个时间槽的异常区域数量: {np.sum(y[:, :, 0], axis=0)}")
-    
-    # 将标签重塑为与输入数据相同的形状
-    y = y.reshape(n_zones, n_time_slots, 2)  # 确保标签形状正确
-    y = y.transpose(1, 0, 2)  # 转置为 (时间槽, 区域, 异常类型)
-    y = y.reshape(1, n_time_slots, n_zones, 2)  # 添加天数维度
-    y = np.repeat(y, test_X.shape[0], axis=0)  # 复制到与test_X相同的天数
-    
-    return X, val_X, test_X, (adj, dist, poi_sim), y
+    # 将处理后的数据转换回numpy数组
+    X = processed_X.cpu().detach().numpy()
+    test_X = processed_test_X.cpu().detach().numpy()
+    y = None  # Assuming y is not provided in the original function
+
+    print("\n=== 时频掩蔽处理完成 ===")
+    print(f"处理后的训练集形状: {X.shape}")
+    print(f"处理后的测试集形状: {test_X.shape}")
+
+    return X, test_X, (adj, dist, poi_sim), y
 
 def get_loader_segment(data, patch_len, stride, batch_size, shuffle=True):
     """
@@ -295,19 +386,22 @@ def get_loader_segment(data, patch_len, stride, batch_size, shuffle=True):
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
 if __name__ == "__main__":
-    # 测试数据加载
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--normalize', action='store_true')
-    parser.add_argument('--n_day', type=int, default=14)  # 默认值改为14
+    parser.add_argument('--normalize', action='store_true', help='是否归一化数据')
+    parser.add_argument('--n_day', type=int, default=14, help='训练集天数')
+    parser.add_argument('--inject_anomaly', action='store_true', help='是否注入异常')
+    parser.add_argument('--anomaly_ratio', type=float, default=0.1, help='异常比例')
     args = parser.parse_args()
     
-    X, val_X, test_X, (adj, dist, poi_sim), y = load_dataset(args)
-    print(f"\n最终数据形状:")
+    # 加载数据集
+    X, test_X, (adj, dist, poi_sim), y = load_dataset(args)
+    
+    print("\n最终数据形状:")
     print(f"X shape: {X.shape}")
-    print(f"val_X shape: {val_X.shape}")
     print(f"test_X shape: {test_X.shape}")
     print(f"adj shape: {adj.shape}")
     print(f"dist shape: {dist.shape}")
     print(f"poi_sim shape: {poi_sim.shape}")
-    print(f"y shape: {y.shape}") 
+    if y is not None:
+        print(f"y shape: {y.shape}") 
