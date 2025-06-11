@@ -1096,11 +1096,11 @@ class STPatchMaskFormer(STPatchFormer):
             time_scores = time_scores.reshape(time_scores.shape[0], -1)        # [N, T*D]
             
             # 展平所有数组
-                y_true_region_flat = y_true_region.reshape(-1)
-                region_scores_flat = region_scores.reshape(-1)
-                y_true_time_flat = y_true_time.reshape(-1)
-                time_scores_flat = time_scores.reshape(-1)
-                
+            y_true_region_flat = y_true_region.reshape(-1)
+            region_scores_flat = region_scores.reshape(-1)
+            y_true_time_flat = y_true_time.reshape(-1)
+            time_scores_flat = time_scores.reshape(-1)
+            
             # 确保所有数组长度相同
             min_length = min(len(y_true_region_flat), len(region_scores_flat))
             y_true_region_flat = y_true_region_flat[:min_length]
@@ -1119,8 +1119,8 @@ class STPatchMaskFormer(STPatchFormer):
                 print(f"y_true_time_flat长度: {len(y_true_time_flat)}")
                 print(f"time_scores_flat长度: {len(time_scores_flat)}")
                 raise e
-                
-                return {
-                    'region_auc': region_auc,
-                    'time_auc': time_auc
-                }
+            
+            return {
+                'region_auc': region_auc,
+                'time_auc': time_auc
+            }
