@@ -9,3 +9,5 @@ data/pems08*
 checkpoint.pt
 STAnomalyFormer/interface/__pycache__/
 data/*.npy
+processed_test_data.npy
+processed_train_data.npy
