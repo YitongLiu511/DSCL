@@ -13,11 +13,12 @@ class DataEmbedding(nn.Module):
 
     def forward(self, x):
         # 确保输入维度正确
-        if len(x.shape) == 3:  # [B, T, C]
-            B, T, C = x.shape
-            x = x.reshape(-1, C)  # [B*T, C]
-            x = self.value_embedding(x)  # [B*T, D]
-            x = x.reshape(B, T, -1)  # [B, T, D]
+        if len(x.shape) == 4:  # [B, T, N, F]
+            B, T, N, F = x.shape
+            x = x.reshape(B, T, -1)  # [B, T, N*F]
+            x = self.value_embedding(x)  # [B, T, D]
+        elif len(x.shape) == 3:  # [B, T, C]
+            x = self.value_embedding(x)  # [B, T, D]
         else:
             x = self.value_embedding(x)
         return self.dropout(x)
@@ -47,28 +48,20 @@ class TemporalFrequencyMasking(nn.Module):
         window_size: int,
         temporal_mask_ratio: float = 0.1,
         frequency_mask_ratio: float = 0.1,
-        d_model: int = 512,
+        d_model: int = 263,
+        n_features: int = 2,
         device: Optional[str] = None
     ):
-        """
-        时频掩蔽模块
-        
-        Args:
-            window_size: 时间掩蔽的窗口大小
-            temporal_mask_ratio: 时间掩蔽的比例
-            frequency_mask_ratio: 频率掩蔽的比例
-            d_model: 模型维度
-            device: 设备
-        """
         super().__init__()
         self.window_size = window_size
         self.temporal_mask_ratio = temporal_mask_ratio
         self.frequency_mask_ratio = frequency_mask_ratio
         self.d_model = d_model
+        self.n_features = n_features
         self.device = device if device is not None else ('cuda' if torch.cuda.is_available() else 'cpu')
         
-        # 数据嵌入
-        self.emb = DataEmbedding(c_in=263, d_model=d_model)
+        # 数据嵌入 - 输入维度为 区域数*特征数
+        self.emb = DataEmbedding(c_in=d_model * n_features, d_model=d_model)
         self.pos_emb = PositionalEmbedding(d_model=d_model)
         
         # 时间掩蔽的可学习参数
@@ -82,7 +75,6 @@ class TemporalFrequencyMasking(nn.Module):
         
         # 频率掩蔽的可学习参数
         self.frequency_mask_token = nn.Parameter(torch.zeros(1, d_model, 1, dtype=torch.cfloat))
-        # 修改频率投影层，使其能够处理单个值
         self.frequency_projection = nn.Sequential(
             nn.Linear(1, d_model),
             nn.GELU(),
@@ -92,23 +84,21 @@ class TemporalFrequencyMasking(nn.Module):
         
         # 将模型移动到指定设备
         self.to(self.device)
-
+        
     def temporal_masking(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        时间掩蔽
-        
+        时间掩蔽 - 同时考虑所有特征
         Args:
-            x: 输入张量 [B, T, C]
-            
+            x: 输入张量 [B, T, N, F]
         Returns:
             掩蔽后的张量和掩蔽位置
         """
-        # 确保输入在正确的设备上
         x = x.to(self.device)
-        B, T, C = x.shape
+        B, T, N, f = x.shape
         
-        # 数据嵌入
-        ex = self.emb(x)  # [B, T, D]
+        # 合并所有特征进行嵌入
+        x_reshaped = x.reshape(B, T, -1)  # [B, T, N*f]
+        ex = self.emb(x_reshaped)  # [B, T, D]
         ex = ex + self.pos_emb(torch.arange(T, device=self.device))
         
         # 计算滑动窗口统计
@@ -116,13 +106,13 @@ class TemporalFrequencyMasking(nn.Module):
         ex2 = ex ** 2
         
         # 计算滑动窗口和
-        ltr = F.conv1d(ex.transpose(1, 2).reshape(-1, ex.shape[1]).unsqueeze(1), 
-                      filters, padding=self.window_size-1)
+        ex_reshaped = ex.transpose(1, 2).reshape(-1, ex.shape[1]).unsqueeze(1)  # [B*D, 1, T]
+        ltr = F.conv1d(ex_reshaped, filters, padding=self.window_size-1)
         ltr[:,:,:self.window_size-1] /= torch.arange(1, self.window_size, device=self.device)
         ltr[:,:,self.window_size-1:] /= self.window_size
         
-        ltr2 = F.conv1d(ex2.transpose(1, 2).reshape(-1, ex.shape[1]).unsqueeze(1), 
-                       filters, padding=self.window_size-1)
+        ex2_reshaped = ex2.transpose(1, 2).reshape(-1, ex2.shape[1]).unsqueeze(1)  # [B*D, 1, T]
+        ltr2 = F.conv1d(ex2_reshaped, filters, padding=self.window_size-1)
         ltr2[:,:,:self.window_size-1] /= torch.arange(1, self.window_size, device=self.device)
         ltr2[:,:,self.window_size-1:] /= self.window_size
         
@@ -134,11 +124,10 @@ class TemporalFrequencyMasking(nn.Module):
         
         score = ltrd.sum(-1) / (ltrm.sum(-1) + 1e-6)
         
-        # 选择掩码位置 - 修改为考虑所有天数
-        num_mask = int(T * self.temporal_mask_ratio)  # 每天掩码的时间戳数量
+        # 选择掩码位置
+        num_mask = int(T * self.temporal_mask_ratio)
         masked_indices = torch.zeros(B, num_mask, dtype=torch.long, device=self.device)
         for b in range(B):
-            # 对每天选择num_mask个时间戳进行掩码
             day_masked_idx = score[b].topk(num_mask, dim=0, sorted=False)[1]
             masked_indices[b] = day_masked_idx
         
@@ -146,51 +135,50 @@ class TemporalFrequencyMasking(nn.Module):
         masked_x = ex.clone()
         for b in range(B):
             masked_x[b, masked_indices[b]] = self.temporal_mask_token
-            
+        
         # 对未掩码位置进行投影
         unmasked_indices = torch.ones(B, T, dtype=torch.bool, device=self.device)
         for b in range(B):
             unmasked_indices[b, masked_indices[b]] = False
-            
+        
         unmasked_values = masked_x[unmasked_indices]
         projected_values = self.temporal_projection(unmasked_values)
         masked_x[unmasked_indices] = projected_values
         
+        # 将掩码后的嵌入转换回原始特征空间
+        masked_x = self.emb.value_embedding.weight.T @ masked_x.transpose(1, 2)
+        masked_x = masked_x.transpose(1, 2)
+        masked_x = masked_x.reshape(B, T, N, f)
+        
         return masked_x, masked_indices
-
+    
     def frequency_masking(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        频率掩蔽
-        
+        频率掩蔽 - 同时考虑所有特征
         Args:
-            x: 输入张量 [B, T, C]
-            
+            x: 输入张量 [B, T, N, F]
         Returns:
             掩蔽后的张量和掩蔽位置
         """
-        # 确保输入在正确的设备上
         x = x.to(self.device)
-        B, T, C = x.shape
-        print(f"输入张量形状: {x.shape}")
+        B, T, N, f = x.shape
         
-        # 数据嵌入
-        ex = self.emb(x)  # [B, T, D]
-        print(f"嵌入后形状: {ex.shape}")
+        # 合并所有特征进行嵌入
+        x_reshaped = x.reshape(B, T, -1)  # [B, T, N*f]
+        ex = self.emb(x_reshaped)  # [B, T, D]
         ex = ex + self.pos_emb(torch.arange(T, device=self.device))
         
         # FFT变换
         cx = torch.fft.rfft(ex.transpose(1, 2))  # [B, D, T//2 + 1]
-        print(f"FFT后形状: {cx.shape}")
         
         # 计算幅度
         mag = torch.sqrt(cx.real ** 2 + cx.imag ** 2)  # [B, D, T//2 + 1]
         
-        # 选择掩码位置 - 修改为考虑所有天数
-        num_mask = int(T * self.frequency_mask_ratio)  # 每天掩码的时间戳数量
+        # 选择掩码位置
+        num_mask = int(T * self.frequency_mask_ratio)
         masked_indices = torch.zeros(B, num_mask, dtype=torch.long, device=self.device)
         for b in range(B):
-            # 对每天选择num_mask个频率分量进行掩码
-            day_mag = mag[b].mean(dim=0)  # 对每个频率分量取平均
+            day_mag = mag[b].mean(dim=0)
             day_masked_idx = day_mag.topk(num_mask, dim=0, sorted=False)[1]
             masked_indices[b] = day_masked_idx
         
@@ -201,45 +189,32 @@ class TemporalFrequencyMasking(nn.Module):
         
         # 逆FFT变换
         masked_x = torch.fft.irfft(masked_fft).transpose(1, 2)  # [B, T, D]
-        print(f"逆FFT后形状: {masked_x.shape}")
         
         # 将频率域掩码转换为时域掩码
-        time_domain_mask = torch.zeros(B, T, C, dtype=torch.bool, device=self.device)
+        time_domain_mask = torch.zeros(B, T, N*f, dtype=torch.bool, device=self.device)
         for b in range(B):
-            for c in range(C):
-                # 获取当前区域的频率掩码
+            for n in range(N*f):
                 freq_mask = torch.zeros(T//2 + 1, dtype=torch.bool, device=self.device)
                 freq_mask[masked_indices[b]] = True
-                # 将频率掩码转换为时域掩码
-                time_domain_mask[b, :, c] = torch.fft.irfft(freq_mask.float()).bool()
-        print(f"时域掩码形状: {time_domain_mask.shape}")
+                time_domain_mask[b, :, n] = torch.fft.irfft(freq_mask.float()).bool()
+        
+        # 将掩码后的嵌入转换回原始特征空间
+        masked_x = self.emb.value_embedding.weight.T @ masked_x.transpose(1, 2)
+        masked_x = masked_x.transpose(1, 2)
+        masked_x = masked_x.reshape(B, T, N, f)
         
         # 对未掩码位置进行投影
-        # 首先将masked_x转换回原始维度
-        masked_x = self.emb.value_embedding.weight.T @ masked_x.transpose(1, 2)  # [B, C, T]
-        masked_x = masked_x.transpose(1, 2)  # [B, T, C]
-        print(f"转换回原始维度后形状: {masked_x.shape}")
-        
-        # 获取未掩码位置的值
-        unmasked_values = masked_x[~time_domain_mask]  # [N]
-        print(f"未掩码值形状: {unmasked_values.shape}")
-        
-        # 对未掩码值进行投影
-        projected_values = self.frequency_projection(unmasked_values.unsqueeze(-1))  # [N, 1]
-        print(f"投影后形状: {projected_values.shape}")
-        
-        # 将投影后的值放回原位置
-        masked_x[~time_domain_mask] = projected_values.squeeze(-1)
+        unmasked_values = masked_x[~time_domain_mask.reshape(B, T, N, f)]
+        projected_values = self.frequency_projection(unmasked_values.unsqueeze(-1))
+        masked_x[~time_domain_mask.reshape(B, T, N, f)] = projected_values.squeeze(-1)
         
         return masked_x, masked_indices
-
+    
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         前向传播
-        
         Args:
-            x: 输入张量 [B, T, C]
-            
+            x: 输入张量 [B, T, N, F]
         Returns:
             时间掩蔽后的张量、时间掩蔽位置、频率掩蔽后的张量、频率掩蔽位置
         """
@@ -249,4 +224,61 @@ class TemporalFrequencyMasking(nn.Module):
         # 频率掩蔽
         frequency_masked_x, frequency_mask_indices = self.frequency_masking(x)
         
-        return temporal_masked_x, temporal_mask_indices, frequency_masked_x, frequency_mask_indices 
+        # 保存掩码后的数据为.npy格式
+        np.save('new_version/temporal_masked_data.npy', temporal_masked_x.detach().cpu().numpy())
+        np.save('new_version/frequency_masked_data.npy', frequency_masked_x.detach().cpu().numpy())
+        np.save('new_version/temporal_mask_indices.npy', temporal_mask_indices.detach().cpu().numpy())
+        np.save('new_version/frequency_mask_indices.npy', frequency_mask_indices.detach().cpu().numpy())
+        
+        return temporal_masked_x, temporal_mask_indices, frequency_masked_x, frequency_mask_indices
+
+def temporal_frequency_masking(x, temporal_mask_ratio=0.1, freq_mask_ratio=0.1):
+    """
+    同时应用时间掩码和频率掩码
+    
+    参数:
+        x: 输入数据，形状为 [B, T, N, F, 2]
+        temporal_mask_ratio: 时间掩码比例
+        freq_mask_ratio: 频率掩码比例
+    """
+    batch_size, num_days, num_nodes, num_freq, num_features = x.shape
+    
+    # 合并14天和144个时间槽，保持特征维度
+    x = x.reshape(batch_size, -1, num_nodes, num_features)  # [B, T*F, N, 2]
+    
+    # 应用时间掩码
+    x = temporal_masking(x, temporal_mask_ratio)
+    
+    # 应用频率掩码
+    x = frequency_masking(x, freq_mask_ratio)
+    
+    # 恢复原始形状
+    x = x.reshape(batch_size, num_days, num_nodes, num_freq, num_features)
+    
+    return x
+
+def main():
+    # 加载原始数据
+    train_data = np.load('data/train.npy')
+    test_data = np.load('data/test.npy')
+    
+    # 应用掩码
+    temporal_masked_train, temporal_mask_indices_train, freq_masked_train, freq_mask_indices_train = temporal_frequency_masking(train_data)
+    temporal_masked_test, temporal_mask_indices_test, freq_masked_test, freq_mask_indices_test = temporal_frequency_masking(test_data)
+    
+    # 保存掩码后的数据
+    np.save('data/temporal_masked_train.npy', temporal_masked_train)
+    np.save('data/temporal_masked_test.npy', temporal_masked_test)
+    np.save('data/frequency_masked_train.npy', freq_masked_train)
+    np.save('data/frequency_masked_test.npy', freq_masked_test)
+    
+    # 保存掩码索引
+    np.save('data/temporal_mask_indices_train.npy', temporal_mask_indices_train)
+    np.save('data/temporal_mask_indices_test.npy', temporal_mask_indices_test)
+    np.save('data/frequency_mask_indices_train.npy', freq_mask_indices_train)
+    np.save('data/frequency_mask_indices_test.npy', freq_mask_indices_test)
+    
+    print("掩码后的数据集和掩码索引已保存到data/目录下")
+
+if __name__ == '__main__':
+    main() 
