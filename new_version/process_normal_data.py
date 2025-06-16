@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import math
 from temporal_attention import process_temporal_masked_data
 import torch.nn as nn
+import os
 
 class StaticDependencyMatrix:
     def __init__(self, n_nodes):
@@ -124,16 +125,23 @@ class MultipleGCN(torch.nn.Module):
         return prior
 
     def forward(self, x):
-        # x: [B, T, N] -> [B, T, N, 1]
-        if x.dim() == 3:
-            x = x.unsqueeze(-1)
-        B, T, N, F = x.shape
+        # x: [B, N, C]
+        B, N, C = x.shape
         prior = self.STS  # [N, N]
-        for i in range(self.n_layers):
-            # 空间卷积
-            x = torch.matmul(prior, x)  # [B, T, N, F]
-            # 特征变换
-            x = self.activation(self.linears[i](x))  # [B, T, N, out_channels]
+        
+        # 对每个批次分别处理
+        outputs = []
+        for i in range(B):
+            x_i = x[i]  # [N, C]
+            for j in range(self.n_layers):
+                # 空间卷积
+                x_i = torch.matmul(prior, x_i)  # [N, C]
+                # 特征变换
+                x_i = self.activation(self.linears[j](x_i))  # [N, out_channels]
+            outputs.append(x_i)
+        
+        # 堆叠所有批次的输出
+        x = torch.stack(outputs, dim=0)  # [B, N, out_channels]
         return x, prior
 
 def process_normal_data(batch_size=20):
@@ -141,15 +149,14 @@ def process_normal_data(batch_size=20):
     
     # 1. 加载数据
     print("1. 加载数据...")
-    data_path = 'data/processed'
-    X_normal = np.load(f'{data_path}/X_normal.npy')  # [14, 144, 263, 2]
+    X_normal = np.load('data/temporal_masked_train.npy')  # [14, 144, 263, 2]
     print(f"正常训练集形状: {X_normal.shape}")
     
     # 加载三种邻接矩阵
     print("\n加载邻接矩阵...")
-    adj_distance = np.load(f'{data_path}/dist.npy')
-    adj_correlation = np.load(f'{data_path}/adj.npy')
-    adj_connectivity = np.load(f'{data_path}/poi_sim.npy')
+    adj_distance = np.load('data/processed/dist.npy')
+    adj_correlation = np.load('data/processed/adj.npy')
+    adj_connectivity = np.load('data/processed/poi_sim.npy')
     adj_matrices = torch.stack([
         torch.FloatTensor(adj_distance),
         torch.FloatTensor(adj_correlation),
@@ -157,47 +164,46 @@ def process_normal_data(batch_size=20):
     ])
     print(f"邻接矩阵形状: {adj_matrices.shape}")
     
-    # 2. 分批处理节点，只做时间注意力
-    num_days, num_freq, num_nodes, num_features = X_normal.shape
-    all_processed_X = []
-    for start in range(0, num_nodes, batch_size):
-        end = min(start + batch_size, num_nodes)
-        print(f"\n处理节点 {start} 到 {end-1} ...")
-        # 取出当前批次的节点数据 [14, 144, batch, 2]
-        batch_data = X_normal[:, :, start:end, :]
-        batch_tensor = torch.FloatTensor(batch_data)
-        # 时间注意力处理
-        processed_X, _ = process_temporal_masked_data(
-            batch_tensor,
-            d_model=256,
-            dim_k=32,
-            dim_v=32,
-            n_heads=8,
-            dim_fc=64,
-            device='cpu'
-        )  # [batch, 2016, 256]
-        all_processed_X.append(processed_X.detach().cpu().numpy())
-        print(f"已处理节点 {start} 到 {end-1}")
-    # 合并所有批次
-    all_processed_X = np.concatenate(all_processed_X, axis=0)  # [263, 2016, 256]
+    # 2. 时间注意力处理，先判断是否有缓存
+    temporal_save_path = 'data/processed/temporal_attention_processed.npy'
+    if os.path.exists(temporal_save_path):
+        print(f"\n检测到已存在时间注意力处理结果，直接加载: {temporal_save_path}")
+        all_processed_X = np.load(temporal_save_path)
+    else:
+        num_days, num_freq, num_nodes, num_features = X_normal.shape
+        all_processed_X = []
+        for start in range(0, num_nodes, batch_size):
+            end = min(start + batch_size, num_nodes)
+            print(f"\n处理节点 {start} 到 {end-1} ...")
+            batch_data = X_normal[:, :, start:end, :]
+            batch_tensor = torch.FloatTensor(batch_data)
+            processed_X, _ = process_temporal_masked_data(
+                batch_tensor,
+                d_model=256,
+                dim_k=32,
+                dim_v=32,
+                n_heads=8,
+                dim_fc=64,
+                device='cpu'
+            )  # [batch, 2016, 256]
+            all_processed_X.append(processed_X.detach().cpu().numpy())
+            print(f"已处理节点 {start} 到 {end-1}")
+        all_processed_X = np.concatenate(all_processed_X, axis=0)  # [263, 2016, 256]
+        print("\n时间注意力处理完成，保存结果...")
+        np.save(temporal_save_path, all_processed_X)
+        print(f"已保存到 {temporal_save_path}")
     print("\n时间注意力处理完成，开始空间GCN处理...")
     # 3. 整体做空间GCN
-    all_processed_X_tensor = torch.FloatTensor(all_processed_X)
+    all_processed_X_tensor = torch.FloatTensor(all_processed_X)  # [263, 2016, 256]
+    all_processed_X_tensor = all_processed_X_tensor.permute(1, 0, 2)  # [2016, 263, 256]
+    all_processed_X_tensor = all_processed_X_tensor.unsqueeze(0)      # [1, 2016, 263, 256]
     multiple_gcn = MultipleGCN(
         in_channels=all_processed_X_tensor.shape[-1],
         out_channels=128,
         matrices=adj_matrices,
         n_layers=2
     )
-    spatial_features, _ = multiple_gcn(all_processed_X_tensor)  # [263, 2016, 128]
-    # 保存最终结果
-    save_path = 'data/processed'
-    np.save(f'{save_path}/normal_processed_X.npy', all_processed_X)
-    np.save(f'{save_path}/normal_spatial_features.npy', spatial_features.detach().cpu().numpy())
-    print(f"\n所有数据已保存到 {save_path} 目录")
-    print("保存的数据包括：")
-    print("1. 处理后的正常数据：normal_processed_X.npy")
-    print("2. 空间特征：normal_spatial_features.npy")
+    spatial_features, _ = multiple_gcn(all_processed_X_tensor)  # [1, 2016, 263, 128]
     print("\n=== 处理完成 ===")
 
 if __name__ == "__main__":

@@ -62,8 +62,8 @@ class FrequencyDecoder(nn.Module):
         self.device = device
         self.d_model = d_model
         
-        # 输入投影层
-        self.input_projection = nn.Linear(263, d_model).to(device)
+        # 修改输入投影层维度为2，因为输入特征是2维的
+        self.input_projection = nn.Linear(2, d_model).to(device)
         
         # 多层解码器
         self.layers = nn.ModuleList([
@@ -75,11 +75,11 @@ class FrequencyDecoder(nn.Module):
             ).to(device) for _ in range(n_layers)
         ])
         
-        # 输出投影层
+        # 修改输出投影层维度为2，因为输出特征也是2维的
         self.output_projection = nn.Sequential(
             nn.Linear(d_model, d_model),
             nn.ReLU(),
-            nn.Linear(d_model, 263)
+            nn.Linear(d_model, 2)
         ).to(device)
 
     def forward(self, x, frequency_masked_x):
@@ -111,7 +111,7 @@ class FrequencyDecoder(nn.Module):
             attention_weights.append(attn_weights)
         
         # 输出投影
-        output = self.output_projection(x)  # [B, T, 263]
+        output = self.output_projection(x)  # [B, T, 2]
         
         return output, attention_weights
 

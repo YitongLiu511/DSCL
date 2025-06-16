@@ -162,7 +162,7 @@ class SpatialAttention(nn.Module):
         return output, attn_weights
 
 class SpatialAttentionBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, n_views=2, n_heads=8, dropout=0.0, gcn_type='cheb', K=2):
+    def __init__(self, in_channels, out_channels=2, n_views=2, n_heads=8, dropout=0.0, gcn_type='cheb', K=2):
         super(SpatialAttentionBlock, self).__init__()
         
         # 多视图GCN层
@@ -254,7 +254,7 @@ def process_spatial_attention(temporal_output, adj_list, d_model=256, num_graphs
     print("\n初始化空间注意力处理器...")
     processor = SpatialAttentionBlock(
         in_channels=1,  # 每个节点的特征维度是1
-        out_channels=d_model,
+        out_channels=2,  # 修改为2，与频域解码器输入维度一致
         n_views=num_graphs,
         n_heads=8,
         dropout=0.1,
@@ -306,7 +306,7 @@ def preprocess_temporal_data(data):
     return torch.FloatTensor(data)
 
 class SpatialAttentionProcessor:
-    def __init__(self, d_in=2, d_model=256, dim_k=32, dim_v=32, n_heads=4):
+    def __init__(self, d_in=2, d_model=2, dim_k=32, dim_v=32, n_heads=4):
         self.device = torch.device('cpu')
         self.input_proj = nn.Linear(d_in, d_model).to(self.device)
         self.model = MultiheadAttention(d_model, dim_k, dim_v, n_heads).to(self.device)
