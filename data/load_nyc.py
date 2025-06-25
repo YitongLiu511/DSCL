@@ -17,7 +17,7 @@ def inject_anomalies(data, anomaly_ratio=0.1, random_seed=42):
     """
     注入异常：通过替换连续3个时间戳的片段
     Args:
-        data: 形状为 (n_days, n_slots, n_zones, n_features) 的数据
+        data: 形状为 (n_slots, n_zones, n_features) 的三维数据
         anomaly_ratio: 异常比例，默认0.1
         random_seed: 随机种子
     Returns:
@@ -25,12 +25,13 @@ def inject_anomalies(data, anomaly_ratio=0.1, random_seed=42):
         anomaly_labels: 异常标签，1表示异常，0表示正常
     """
     np.random.seed(random_seed)
-    n_days, n_slots, n_zones, n_features = data.shape
+    total_slots, n_zones, n_features = data.shape
+    
     data_with_anomalies = data.copy()
     anomaly_labels = np.zeros_like(data)
     
     # 计算总数据点数
-    total_points = n_days * n_slots * n_zones
+    total_points = total_slots * n_zones
     # 计算目标异常数据点数
     target_anomaly_points = int(total_points * anomaly_ratio)
     # 计算异常片段数（每个片段3个点）
@@ -38,78 +39,97 @@ def inject_anomalies(data, anomaly_ratio=0.1, random_seed=42):
     
     print(f"\n=== 异常注入统计 ===")
     print(f"区域数量: {n_zones}")
-    print(f"每天时间槽数: {n_slots}")
-    print(f"总天数: {n_days}")
+    print(f"总时间槽数: {total_slots}")
     print(f"特征数量: {n_features}")
     print(f"总数据点数: {total_points}")
     print(f"目标异常数据点数: {target_anomaly_points}")
     print(f"目标异常片段数: {n_anomaly_fragments}")
     print(f"预期异常比例: {anomaly_ratio}")
     
-    def random_sample_fragments(k):
-        """随机采样k个候选片段
+    def random_sample_fragments(k, exclude_zone):
+        """随机采样k个候选片段，并确保不在指定区域
         Args:
-            k: 采样数量，k = sqrt(n * (m-2))
+            k: 采样数量
+            exclude_zone: 需要排除的区域
         Returns:
-            fragments: 候选片段列表，每个元素为(day, slot, zone)
+            fragments: 候选片段列表，每个元素为(slot, zone)
         """
         fragments = []
         for _ in range(k):
             zone = np.random.randint(0, n_zones)
-            day = np.random.randint(0, n_days)
-            slot = np.random.randint(0, n_slots - 2)  # 确保有3个连续时间戳
-            fragments.append((day, slot, zone))
+            # 如果随机选到了要排除的区域，就重新选
+            while zone == exclude_zone:
+                zone = np.random.randint(0, n_zones)
+            slot = np.random.randint(0, total_slots - 2)  # 确保有3个连续时间戳
+            fragments.append((slot, zone))
         return fragments
     
-    # 计算k值（候选片段数）：k = sqrt(n * (m-2))
-    k = int(np.sqrt(n_zones * (n_slots - 2)))
-    print(f"每个目标片段的候选片段数: {k}")
+    # 计算k值
+    k = 200  # 使用一个固定的、合理的k值
+    print(f"每个目标片段的候选片段数 (固定值): {k}")
     
     injected_fragments = 0
     while injected_fragments < n_anomaly_fragments:
         target_zone = np.random.randint(0, n_zones)
-        target_day = np.random.randint(0, n_days)
-        target_slot = np.random.randint(0, n_slots - 2)
-        if np.any(anomaly_labels[target_day, target_slot:target_slot+3, target_zone] == 1):
+        target_slot = np.random.randint(0, total_slots - 2)
+
+        # 检查该位置是否已经是异常
+        if np.any(anomaly_labels[target_slot:target_slot+3, target_zone] == 1):
             continue
-        target_fragment = data[target_day, target_slot:target_slot+3, target_zone]
-        candidate_fragments = random_sample_fragments(k)
+
+        target_fragment = data[target_slot:target_slot+3, target_zone]
+        
+        # 候选片段不能来自目标区域
+        candidate_fragments = random_sample_fragments(k, target_zone)
+        
         candidate_distances = []
-        for candidate_day, candidate_slot, candidate_zone in candidate_fragments:
-            if (candidate_day == target_day and candidate_zone == target_zone and abs(candidate_slot - target_slot) < 3):
+        for candidate_slot, candidate_zone in candidate_fragments:
+            # 避免候选片段与目标片段重叠（虽然跨区域，保险起见）
+            if candidate_zone == target_zone and abs(candidate_slot - target_slot) < 3:
                 continue
-            candidate_fragment = data[candidate_day, candidate_slot:candidate_slot+3, candidate_zone]
+            candidate_fragment = data[candidate_slot:candidate_slot+3, candidate_zone]
             distance = np.linalg.norm(target_fragment - candidate_fragment)
-            candidate_distances.append((distance, candidate_day, candidate_slot, candidate_zone))
+            candidate_distances.append((distance, candidate_slot, candidate_zone))
+            
         if not candidate_distances:
             continue
+            
         best_candidate = max(candidate_distances, key=lambda x: x[0])
-        _, best_day, best_slot, best_zone = best_candidate
-        data_with_anomalies[target_day, target_slot:target_slot+3, target_zone] = \
-            data[best_day, best_slot:best_slot+3, best_zone]
-        anomaly_labels[target_day, target_slot:target_slot+3, target_zone] = 1
+        _, best_slot, best_zone = best_candidate
+        
+        # 替换数据并打上标签
+        data_with_anomalies[target_slot:target_slot+3, target_zone] = \
+            data[best_slot:best_slot+3, best_zone]
+        anomaly_labels[target_slot:target_slot+3, target_zone] = 1
+        
+        # 在注入片段的边缘进行平滑处理，以减小突变
         if target_slot > 0:
-            data_with_anomalies[target_day, target_slot, target_zone] = \
-                0.8 * data[target_day, target_slot, target_zone] + \
-                0.2 * data_with_anomalies[target_day, target_slot, target_zone]
-        if target_slot < n_slots - 3:
-            data_with_anomalies[target_day, target_slot+2, target_zone] = \
-                0.8 * data[target_day, target_slot+2, target_zone] + \
-                0.2 * data_with_anomalies[target_day, target_slot+2, target_zone]
+            # 平滑开始点 (80%原数据 + 20%异常数据)
+            data_with_anomalies[target_slot, target_zone] = \
+                0.8 * data[target_slot, target_zone] + \
+                0.2 * data_with_anomalies[target_slot, target_zone]
+        
+        if target_slot < total_slots - 3:
+            # 平滑结束点 (80%原数据 + 20%异常数据)
+            data_with_anomalies[target_slot + 2, target_zone] = \
+                0.8 * data[target_slot + 2, target_zone] + \
+                0.2 * data_with_anomalies[target_slot + 2, target_zone]
+
         injected_fragments += 1
         if injected_fragments % 100 == 0:
             print(f"已注入异常片段数: {injected_fragments}/{n_anomaly_fragments}")
     
-    # 统计异常点数（只要有一个特征为1就算异常）
+    # 统计异常点数
     actual_anomaly_points = np.sum(np.any(anomaly_labels == 1, axis=-1))
     actual_ratio = actual_anomaly_points / total_points
     print(f"\n=== 异常注入完成 ===")
     print(f"实际注入的异常片段数: {injected_fragments}")
     print(f"实际异常数据点数: {actual_anomaly_points}")
     print(f"实际异常比例: {actual_ratio:.4f}")
+
     return data_with_anomalies, anomaly_labels
 
-def load_dataset(args):
+def load_dataset(args, run_post_processing=True):
     """
     加载纽约出租车数据集
     Args:
@@ -118,11 +138,9 @@ def load_dataset(args):
             n_day: 训练集天数
             inject_anomaly: 是否注入异常
             anomaly_ratio: 异常比例
+        run_post_processing: 是否运行掩码和注意力等后处理步骤
     Returns:
-        X: 训练数据，形状为 (batch_size, n_days*time_slots_per_day, n_zones, 2)
-        test_X: 测试数据，形状为 (batch_size, n_days*time_slots_per_day, n_zones, 2)
-        (adj, dist, poi_sim): 邻接矩阵、距离矩阵和POI相似度矩阵
-        y: 标签
+        根据 run_post_processing 的值，返回不同数量的结果
     """
     # 首先加载邻接矩阵以获取基准区域集合
     adj_data = np.load("data/static_adjacency.npz")
@@ -258,68 +276,59 @@ def load_dataset(args):
     
     print("转换为numpy数组后形状 - 流入:", inflow_values.shape, "流出:", outflow_values.shape)
     
-    # 重塑数据为 (n_days, time_slots_per_day, n_zones, 2)
-    n_days = len(all_days)
-    inflow_values = inflow_values.reshape(n_days, time_slots_per_day, n_zones)
-    outflow_values = outflow_values.reshape(n_days, time_slots_per_day, n_zones)
+    # -- 注释掉三维变四维的操作 --
+    # n_days = len(all_days)
+    # inflow_values = inflow_values.reshape(n_days, time_slots_per_day, n_zones)
+    # outflow_values = outflow_values.reshape(n_days, time_slots_per_day, n_zones)
     
     # 合并流入和流出数据
     flow_values = np.stack([inflow_values, outflow_values], axis=-1)
-    print(f"合并后数据形状: {flow_values.shape}")
+    print(f"合并后数据形状 (三维): {flow_values.shape}")
     
-    # 1. 划分训练集和测试集，各14天
-    n_train = 14  # 训练集14天
-    n_test = 14   # 测试集14天
+    # 1. 划分训练集和测试集
+    # 训练集天数 * 每天时间槽数 = 总时间槽数
+    n_train_slots = 14 * time_slots_per_day
+    n_test_slots = 14 * time_slots_per_day
     
-    X = flow_values[:n_train]
-    test_X = flow_values[n_train:n_train+n_test]
+    X_train = flow_values[:n_train_slots]
+    X_test = flow_values[n_train_slots : n_train_slots + n_test_slots]
+    
+    # 提前初始化标签数组，确保它们总是存在
+    y_train = np.zeros_like(X_train)
+    y_test = np.zeros_like(X_test)
     
     print(f"\n数据集划分:")
-    print(f"训练集形状: {X.shape}")
-    print(f"测试集形状: {test_X.shape}")
+    print(f"训练集形状: {X_train.shape}")
+    print(f"测试集形状: {X_test.shape}")
     
     # 2. 归一化
     if args.normalize:
         print("\n开始归一化...")
         scaler = MinMaxScaler()
         # 使用训练集拟合归一化参数
-        X_reshaped = X.reshape(-1, 2)  # 重塑为2D数组，每行包含流入和流出两个特征
-        scaler.fit(X_reshaped)
+        X_train_reshaped = X_train.reshape(-1, 2)  # 重塑为2D数组，每行包含流入和流出两个特征
+        scaler.fit(X_train_reshaped)
         # 转换训练集和测试集
-        X = scaler.transform(X_reshaped).reshape(X.shape)
-        test_X = scaler.transform(test_X.reshape(-1, 2)).reshape(test_X.shape)
+        X_train = scaler.transform(X_train_reshaped).reshape(X_train.shape)
+        X_test = scaler.transform(X_test.reshape(-1, 2)).reshape(X_test.shape)
         print("归一化完成")
         
         # 保存归一化后的数据
-        np.save('data/normalized_train.npy', X)
-        np.save('data/normalized_test.npy', test_X)
+        np.save('data/normalized_train.npy', X_train)
+        np.save('data/normalized_test.npy', X_test)
         print("已保存归一化后的训练集和测试集")
     
     # 3. 在归一化后的训练集中注入异常
     if args.inject_anomaly:
         print("\n开始注入异常...")
-        X_with_anomalies, anomaly_labels = inject_anomalies(X, anomaly_ratio=args.anomaly_ratio)
+        X_train, y_train = inject_anomalies(X_train, anomaly_ratio=args.anomaly_ratio)
         
-        # 保存异常标签和注入异常后的训练集
-        np.save('data/anomaly_labels.npy', anomaly_labels)
-        np.save('data/anomaly_injected_train.npy', X_with_anomalies)
-        print("已保存异常标签和注入异常后的训练集")
-        
-        # 更新训练集为注入异常后的数据
-        X = X_with_anomalies
-    
-    # 4. 添加batch维度
-    # 将数据重塑为 (batch_size, n_days*time_slots_per_day, n_zones, 2)
-    batch_size = 1  # 可以根据需要调整batch_size
-    X = X.reshape(batch_size, -1, n_zones, 2)
-    test_X = test_X.reshape(batch_size, -1, n_zones, 2)
-    
-    print(f"\n最终数据形状:")
-    print(f"训练集形状: {X.shape}")
-    print(f"测试集形状: {test_X.shape}")
-    
-    # 应用时频掩蔽
-    print("\n=== 开始时频掩蔽处理 ===\n")
+    # 如果不需要后处理，则直接返回
+    if not run_post_processing:
+        return X_train, X_test, (adj, dist, poi_sim), y_train, y_test
+
+    # --- 后续处理（时频掩码、注意力等） ---
+    print("\n=== 开始时频掩蔽处理 ===")
     
     # 创建时频掩蔽模块
     masking_module = TemporalFrequencyMasking(
@@ -330,67 +339,68 @@ def load_dataset(args):
     )
     
     # 将数据转换为PyTorch张量
-    X_tensor = torch.FloatTensor(X)
-    test_X_tensor = torch.FloatTensor(test_X)
+    X_train_tensor = torch.FloatTensor(X_train)
+    X_test_tensor = torch.FloatTensor(X_test)
     
     print("处理训练集...")
-    temporal_masked_X, temporal_mask_indices = masking_module.temporal_masking(X_tensor)
-    frequency_masked_X, frequency_mask_indices = masking_module.frequency_masking(X_tensor)
-    print(f"训练集时间掩蔽位置数量: {temporal_mask_indices.shape[0] * temporal_mask_indices.shape[1]}")
-    print(f"训练集频率掩蔽位置数量: {frequency_mask_indices.shape[0] * frequency_mask_indices.shape[1]}")
+    temporal_masked_X_train, temporal_mask_indices_train = masking_module.temporal_masking(X_train_tensor)
+    frequency_masked_X_train, frequency_mask_indices_train = masking_module.frequency_masking(X_train_tensor)
+    print(f"训练集时间掩蔽位置数量: {temporal_mask_indices_train.shape[0] * temporal_mask_indices_train.shape[1]}")
+    print(f"训练集频率掩蔽位置数量: {frequency_mask_indices_train.shape[0] * frequency_mask_indices_train.shape[1]}")
     
     print("\n处理测试集...")
-    temporal_masked_test_X, temporal_mask_indices_test = masking_module.temporal_masking(test_X_tensor)
-    frequency_masked_test_X, frequency_mask_indices_test = masking_module.frequency_masking(test_X_tensor)
+    temporal_masked_X_test, temporal_mask_indices_test = masking_module.temporal_masking(X_test_tensor)
+    frequency_masked_X_test, frequency_mask_indices_test = masking_module.frequency_masking(X_test_tensor)
     print(f"测试集时间掩蔽位置数量: {temporal_mask_indices_test.shape[0] * temporal_mask_indices_test.shape[1]}")
     print(f"测试集频率掩蔽位置数量: {frequency_mask_indices_test.shape[0] * frequency_mask_indices_test.shape[1]}")
     
     # 将掩蔽后的数据转换为numpy数组
-    X = temporal_masked_X.cpu().detach().numpy()
-    test_X = temporal_masked_test_X.cpu().detach().numpy()
+    X_train = temporal_masked_X_train.cpu().detach().numpy()
+    X_test = temporal_masked_X_test.cpu().detach().numpy()
     
     # 添加时间注意力处理
-    print("\n=== 开始时间注意力处理 ===\n")
+    print("\n=== 开始时间注意力处理 ===")
     
     print("处理训练集时间掩码数据...")
     # 将numpy数组转回PyTorch张量
-    temporal_masked_X_tensor = torch.FloatTensor(X)
+    temporal_masked_X_train_tensor = torch.FloatTensor(X_train)
     # 应用时间注意力处理
-    processed_X, train_attention_weights = process_temporal_masked_data(
-        temporal_masked_X_tensor,
+    processed_X_train, train_attention_weights = process_temporal_masked_data(
+        temporal_masked_X_train_tensor,
         d_model=263,  # 使用区域数量作为模型维度
-        nhead=8,
+        n_heads=8,
         device='cuda' if torch.cuda.is_available() else 'cpu'
     )
-    print(f"训练集时间注意力处理完成，输出形状: {processed_X.shape}")
+    print(f"训练集时间注意力处理完成，输出形状: {processed_X_train.shape}")
     print(f"注意力权重数量: {len(train_attention_weights)}")
     
     print("\n处理测试集时间掩码数据...")
-    temporal_masked_test_X_tensor = torch.FloatTensor(test_X)
-    processed_test_X, test_attention_weights = process_temporal_masked_data(
-        temporal_masked_test_X_tensor,
+    temporal_masked_X_test_tensor = torch.FloatTensor(X_test)
+    processed_X_test, test_attention_weights = process_temporal_masked_data(
+        temporal_masked_X_test_tensor,
         d_model=263,
-        nhead=8,
+        n_heads=8,
         device='cuda' if torch.cuda.is_available() else 'cpu'
     )
-    print(f"测试集时间注意力处理完成，输出形状: {processed_test_X.shape}")
+    print(f"测试集时间注意力处理完成，输出形状: {processed_X_test.shape}")
     print(f"注意力权重数量: {len(test_attention_weights)}")
     
     # 将处理后的数据转换回numpy数组
-    X = processed_X.cpu().detach().numpy()
-    test_X = processed_test_X.cpu().detach().numpy()
-    y = None  # Assuming y is not provided in the original function
+    X_train = processed_X_train.cpu().detach().numpy()
+    X_test = processed_X_test.cpu().detach().numpy()
+    y_train = None  # Assuming y_train is not provided in the original function
+    y_test = None  # Assuming y_test is not provided in the original function
 
     print("\n=== 时频掩蔽处理完成 ===")
-    print(f"处理后的训练集形状: {X.shape}")
-    print(f"处理后的测试集形状: {test_X.shape}")
+    print(f"处理后的训练集形状: {X_train.shape}")
+    print(f"处理后的测试集形状: {X_test.shape}")
     
     # 保存最终处理后的数据
-    np.save('data/processed_train.npy', X)
-    np.save('data/processed_test.npy', test_X)
+    np.save('data/processed_train.npy', X_train)
+    np.save('data/processed_test.npy', X_test)
     print("已保存最终处理后的训练集和测试集")
 
-    return X, test_X, (adj, dist, poi_sim), y
+    return X_train, X_test, (adj, dist, poi_sim), y_train, y_test
 
 def get_loader_segment(data, patch_len, stride, batch_size, shuffle=True):
     """
@@ -450,13 +460,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # 加载数据集
-    X, test_X, (adj, dist, poi_sim), y = load_dataset(args)
+    X_train, X_test, (adj, dist, poi_sim), y_train, y_test = load_dataset(args)
     
     print("\n最终数据形状:")
-    print(f"X shape: {X.shape}")
-    print(f"test_X shape: {test_X.shape}")
+    print(f"X_train shape: {X_train.shape}")
+    print(f"X_test shape: {X_test.shape}")
     print(f"adj shape: {adj.shape}")
     print(f"dist shape: {dist.shape}")
     print(f"poi_sim shape: {poi_sim.shape}")
-    if y is not None:
-        print(f"y shape: {y.shape}") 
+    if y_train is not None:
+        print(f"y_train shape: {y_train.shape}")
+    if y_test is not None:
+        print(f"y_test shape: {y_test.shape}") 

@@ -42,21 +42,26 @@ def test_spatial_attention():
         
         # 处理每个时间步
         outputs = []
+        all_scores = []
         for t in range(data.size(0)):
             x_t = data[t].unsqueeze(-1)  # [263, 2, 1]
-            x_s = processor(x_t, adj_list)  # [263, 2, 2]
+            x_s, scores = processor(x_t, adj_list)  # [263, 2, 2], [1, 2, 263, 263]
             x_s = x_s.mean(dim=-1)  # [263, 2]
             outputs.append(x_s)
+            all_scores.append(scores)
         
         # 堆叠所有时间步的输出
         output = torch.stack(outputs, dim=0)  # [2016, 263, 2]
         output = output.permute(1, 0, 2)  # [263, 2016, 2]
+        all_scores = torch.stack(all_scores, dim=0)  # [2016, 1, 2, 263, 263]
         
         print(f"处理完成，输出形状: {output.shape}")
+        print(f"注意力分数形状: {all_scores.shape}")
         
         # 保存结果
         np.save('data/spatial_attention_processed_train.npy', output.detach().numpy())
-        print("结果已保存到 data/spatial_attention_processed_train.npy")
+        np.save('data/spatial_attention_scores_train.npy', all_scores.detach().numpy())
+        print("结果已保存到 data/spatial_attention_processed_train.npy 和 data/spatial_attention_scores_train.npy")
         
     except Exception as e:
         print(f"处理过程中出错: {str(e)}")

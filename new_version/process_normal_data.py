@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 import math
-from temporal_attention import process_temporal_masked_data
+from .temporal_attention import process_temporal_masked_data
 import torch.nn as nn
 import os
 
@@ -58,33 +58,31 @@ class SingleGCN(torch.nn.Module):
         self.linears = torch.nn.ModuleList(
             [torch.nn.Linear(in_channels, out_channels, bias=bias)] + [
                 torch.nn.Linear(out_channels, out_channels, bias=bias)
-                for _ in range(n_layers - 1)
+                for _ in range(n_layers)
             ])
         self.mat_2 = dist_mat.square()
         self.mask = self.generate_mask()
 
     def generate_mask(self):
+        # 距离为0的位置设为1，对角线设为0，与DSCL-master保持一致
         matrix = (self.dist_mat.cpu().detach().numpy() == 0.).astype(int)
-        matrix = torch.tensor(matrix, device=self.dist_mat.device)
-        return matrix
+        # 对角线设为0
+        matrix[range(matrix.shape[0]), range(matrix.shape[0])] = 0
+        return torch.Tensor(matrix) == 1
 
     def forward(self, x):
-        # 调整输入维度以适应GCN处理
-        B, T, D = x.shape
-        x = x.reshape(B * T, D)  # 将时间维度合并到批次维度
-        
+        # 计算收缩矩阵, x : (N, T, D) 或 (B, N, D)
         sigma = torch.sigmoid(self.sigma.weight * 5) + 1e-5
         sigma = torch.pow(3, sigma) - 1
         exp = torch.exp(-self.mat_2 / (2 * sigma**2))
         prior = exp / (math.sqrt(2 * math.pi) * sigma)
-        prior = prior * self.mask
+        prior = prior.masked_fill(self.mask.to(exp.device), 0)  # 使用masked_fill而不是乘法
+        prior /= prior.sum(0)  # 添加归一化，与DSCL-master保持一致
 
         for i in range(self.n_layers):
             wx = prior @ x
             x = self.activation(self.linears[i](wx))
         
-        # 恢复原始维度
-        x = x.reshape(B, T, self.out_channels)
         return x, prior
 
 class MultipleGCN(torch.nn.Module):
@@ -100,17 +98,20 @@ class MultipleGCN(torch.nn.Module):
         d = self.matrices.shape[-1]
         self.sigma = torch.nn.Linear(self.n_graph, d)
         self.alpha = torch.nn.parameter.Parameter(torch.ones(self.n_graph) / self.n_graph)
+        # 修复线性层维度，应该是in_channels而不是1
         self.linears = nn.ModuleList(
-            [nn.Linear(1, out_channels, bias=bias)] +
+            [nn.Linear(in_channels, out_channels, bias=bias)] +
             [nn.Linear(out_channels, out_channels, bias=bias) for _ in range(n_layers-1)]
         )
         self.mat_2 = matrices.square()
         self.mask = self.generate_mask()
 
     def generate_mask(self):
-        matrix = (self.matrices.cpu().detach().numpy() == 0.).astype(bool)
-        matrix = torch.tensor(matrix, device=self.matrices.device)
-        return matrix
+        # 距离为0的位置设为1，对角线设为0，与DSCL-master保持一致
+        matrix = (self.matrices.cpu().detach().numpy() == 0.).astype(int)
+        # 对角线设为0
+        matrix[:, range(matrix.shape[1]), range(matrix.shape[1])] = 0
+        return torch.Tensor(matrix) == 1
 
     @property
     def STS(self):
@@ -125,23 +126,13 @@ class MultipleGCN(torch.nn.Module):
         return prior
 
     def forward(self, x):
-        # x: [B, N, C]
-        B, N, C = x.shape
+        # 直接对整个批次处理，与DSCL-master保持一致
         prior = self.STS  # [N, N]
         
-        # 对每个批次分别处理
-        outputs = []
-        for i in range(B):
-            x_i = x[i]  # [N, C]
-            for j in range(self.n_layers):
-                # 空间卷积
-                x_i = torch.matmul(prior, x_i)  # [N, C]
-                # 特征变换
-                x_i = self.activation(self.linears[j](x_i))  # [N, out_channels]
-            outputs.append(x_i)
+        for i in range(self.n_layers):
+            wx = prior @ x  # [B, N, C]
+            x = self.activation(self.linears[i](wx))
         
-        # 堆叠所有批次的输出
-        x = torch.stack(outputs, dim=0)  # [B, N, out_channels]
         return x, prior
 
 def process_normal_data(batch_size=20):
@@ -149,8 +140,13 @@ def process_normal_data(batch_size=20):
     
     # 1. 加载数据
     print("1. 加载数据...")
-    X_normal = np.load('data/temporal_masked_train.npy')  # [14, 144, 263, 2]
-    print(f"正常训练集形状: {X_normal.shape}")
+    # X_normal = np.load('data/temporal_masked_train.npy')  # [14, 144, 263, 2]
+    X_normal = np.load('data/processed/train_data_with_anomalies_3d.npy')
+    print(f"原始数据形状: {X_normal.shape}")
+    # 如果是3维，自动扩展为4维
+    if X_normal.ndim == 3:
+        X_normal = np.expand_dims(X_normal, axis=0)
+        print(f"扩展为4维后形状: {X_normal.shape}")
     
     # 加载三种邻接矩阵
     print("\n加载邻接矩阵...")
@@ -170,41 +166,51 @@ def process_normal_data(batch_size=20):
         print(f"\n检测到已存在时间注意力处理结果，直接加载: {temporal_save_path}")
         all_processed_X = np.load(temporal_save_path)
     else:
+        print("\n未检测到缓存，逐节点做时间自注意力处理...")
         num_days, num_freq, num_nodes, num_features = X_normal.shape
         all_processed_X = []
-        for start in range(0, num_nodes, batch_size):
-            end = min(start + batch_size, num_nodes)
-            print(f"\n处理节点 {start} 到 {end-1} ...")
-            batch_data = X_normal[:, :, start:end, :]
-            batch_tensor = torch.FloatTensor(batch_data)
+        for i in range(num_nodes):
+            #print(f"\n处理节点 {i} ...")
+            # 获取当前节点的所有时间步
+            node_data = X_normal[:, :, i:i+1, :]  # [1, 2016, 1, 2]
+            node_tensor = torch.FloatTensor(node_data)
             processed_X, _ = process_temporal_masked_data(
-                batch_tensor,
+                node_tensor,
                 d_model=256,
                 dim_k=32,
                 dim_v=32,
                 n_heads=8,
                 dim_fc=64,
                 device='cpu'
-            )  # [batch, 2016, 256]
+            )  # [1, 2016, 256]
             all_processed_X.append(processed_X.detach().cpu().numpy())
-            print(f"已处理节点 {start} 到 {end-1}")
+            #print(f"已处理节点 {i}")
         all_processed_X = np.concatenate(all_processed_X, axis=0)  # [263, 2016, 256]
         print("\n时间注意力处理完成，保存结果...")
         np.save(temporal_save_path, all_processed_X)
         print(f"已保存到 {temporal_save_path}")
     print("\n时间注意力处理完成，开始空间GCN处理...")
+    
     # 3. 整体做空间GCN
     all_processed_X_tensor = torch.FloatTensor(all_processed_X)  # [263, 2016, 256]
     all_processed_X_tensor = all_processed_X_tensor.permute(1, 0, 2)  # [2016, 263, 256]
     all_processed_X_tensor = all_processed_X_tensor.unsqueeze(0)      # [1, 2016, 263, 256]
+    
     multiple_gcn = MultipleGCN(
         in_channels=all_processed_X_tensor.shape[-1],
         out_channels=128,
         matrices=adj_matrices,
         n_layers=2
     )
-    spatial_features, _ = multiple_gcn(all_processed_X_tensor)  # [1, 2016, 263, 128]
+    
+    spatial_features, static_scores = multiple_gcn(all_processed_X_tensor)  # [1, 2016, 263, 128], [263, 263]
+    print(f"空间特征形状: {spatial_features.shape}")
+    print(f"静态流注意力分数形状: {static_scores.shape}")
     print("\n=== 处理完成 ===")
+    
+    # 保存静态流注意力分数，用于双流对比损失
+    np.save('data/processed/static_scores.npy', static_scores.detach().cpu().numpy())
+    print("静态流注意力分数已保存到 data/processed/static_scores.npy")
 
 if __name__ == "__main__":
     process_normal_data() 

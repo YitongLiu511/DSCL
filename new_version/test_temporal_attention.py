@@ -14,7 +14,17 @@ def test_temporal_attention():
     try:
         # 加载时间掩码后的训练集
         print("加载数据...")
-        masked_data = np.load('data/temporal_masked_train.npy')
+        # masked_data = np.load('data/temporal_masked_train.npy')
+        masked_data = np.load('data/processed/train_data_with_anomalies_3d.npy')
+        print(f"加载的3D数据形状: {masked_data.shape}")
+
+        # 将3D数据转换为4D数据
+        if masked_data.ndim == 3:
+            # 假设原始维度是 (T, N, D)，增加一个_D为1的维度
+            # 在第一个维度上增加一个维度，模拟(B, T, N, D)中的B=1
+            masked_data = np.expand_dims(masked_data, axis=0)
+            print(f"转换后的4D数据形状: {masked_data.shape}")
+
         print(f"数据形状: {masked_data.shape}")
         print(f"初始内存使用: {get_memory_usage():.2f} MB")
         
@@ -95,6 +105,20 @@ def test_temporal_attention():
         print(f"\n全部完成！共处理 {num_nodes} 个节点")
         print(f"输出数据形状: {processed_data.shape}")
         print(f"最终内存使用: {get_memory_usage():.2f} MB")
+
+        # ========== 新增：空间自注意力测试 ==========
+        print("\n开始空间自注意力测试...")
+        from spatial_attention1 import SpatialSelfAttentionBlock
+        # 转为torch张量
+        processed_tensor = torch.from_numpy(processed_data).float()
+        # 空间自注意力
+        spatial_model = SpatialSelfAttentionBlock(d_model=2, n_heads=2)
+        spatial_out, spatial_attn = spatial_model(processed_tensor)
+        print(f"空间自注意力输出形状: {spatial_out.shape}")
+        print(f"空间注意力权重形状: {spatial_attn.shape}")
+        # 可选：保存空间注意力输出
+        np.save('data/spatial_attention_processed_train.npy', spatial_out.detach().cpu().numpy())
+        np.save('data/spatial_attention_weights_train.npy', spatial_attn.detach().cpu().numpy())
         
     except Exception as e:
         print("\n程序执行出错:")

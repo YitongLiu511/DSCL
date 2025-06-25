@@ -159,7 +159,7 @@ class SpatialAttention(nn.Module):
         # 应用输出投影
         output = self.out_proj(attn_output)  # [B, N, out_channels]
         
-        return output, attn_weights
+        return output, scores
 
 class SpatialAttentionBlock(nn.Module):
     def __init__(self, in_channels, out_channels=2, n_views=2, n_heads=8, dropout=0.0, gcn_type='cheb', K=2):
@@ -202,6 +202,9 @@ class SpatialAttentionBlock(nn.Module):
         """
         x: [B, N, C]，B为批次大小，N为节点数，C为特征维度
         adj_list: 图邻接矩阵列表，长度为n_views
+        Returns:
+            output: 处理后的特征 [B, N, out_channels]
+            scores: 空间注意力分数 [B, n_heads, N, N]
         """
         # 1. 多视图GCN处理
         gcn_out = self.gcn(x, adj_list)
@@ -210,8 +213,8 @@ class SpatialAttentionBlock(nn.Module):
         x = x + self.dropout(gcn_out)
         x = self.norm1(x)
         
-        # 2. 空间自注意力处理
-        attn_out, _ = self.attention(x)
+        # 2. 空间自注意力处理 - 获取注意力分数
+        attn_out, attn_scores = self.attention(x)
         
         # 残差连接和层归一化
         x = x + self.dropout(attn_out)
@@ -221,9 +224,10 @@ class SpatialAttentionBlock(nn.Module):
         ff_out = self.feed_forward(x)
         
         # 残差连接
-        x = x + self.dropout(ff_out)
+        output = x + self.dropout(ff_out)
         
-        return x
+        # 返回输出和注意力分数，就像DSCL-master中的MultiheadAttention一样
+        return output, attn_scores
 
 def process_spatial_attention(temporal_output, adj_list, d_model=256, num_graphs=2, device='cpu'):
     """
@@ -238,6 +242,7 @@ def process_spatial_attention(temporal_output, adj_list, d_model=256, num_graphs
         
     Returns:
         processed_data: 处理后的数据 [B, T, N]
+        attention_scores: 注意力分数 [B, T, n_heads, N, N]
     """
     print("\n=== 开始空间注意力处理 ===")
     print(f"输入形状: {temporal_output.shape}")
@@ -266,6 +271,7 @@ def process_spatial_attention(temporal_output, adj_list, d_model=256, num_graphs
     with torch.no_grad():
         # 对每个时间步分别处理
         spatial_outputs = []
+        attention_scores_list = []
         
         for t in range(time_steps):
             #print(f"\n处理第 {t+1}/{time_steps} 个时间步:")
@@ -275,21 +281,24 @@ def process_spatial_attention(temporal_output, adj_list, d_model=256, num_graphs
             x_t = x_t.unsqueeze(-1)  # [B, N, 1]
             #print(f"  重塑后形状: {x_t.shape}")
             
-            x_s = processor(x_t, adj_list)  # [B, N, D]
+            x_s, scores = processor(x_t, adj_list)  # [B, N, D], [B, n_heads, N, N]
             #print(f"  空间注意力处理输出形状: {x_s.shape}")
             
             x_s = x_s.mean(dim=-1)  # [B, N]
             #print(f"  平均池化后形状: {x_s.shape}")
             
             spatial_outputs.append(x_s)
+            attention_scores_list.append(scores)
             #print(f"  添加到输出列表，当前列表长度: {len(spatial_outputs)}")
         
         # 堆叠所有时间步的输出
         processed_data = torch.stack(spatial_outputs, dim=1)  # [B, T, N]
+        attention_scores = torch.stack(attention_scores_list, dim=1)  # [B, T, n_heads, N, N]
         print(f"\n堆叠后最终输出形状: {processed_data.shape}")
+        print(f"注意力分数形状: {attention_scores.shape}")
     
     print("\n=== 空间注意力处理完成 ===")
-    return processed_data
+    return processed_data, attention_scores
 
 def preprocess_temporal_data(data):
     """

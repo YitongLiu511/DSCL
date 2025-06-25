@@ -5,7 +5,7 @@ import numpy as np
 
 def kl_loss(p, q):
     """
-    计算KL散度损失
+    计算KL散度损失，与DSCL-master完全一致
     Args:
         p: 第一个分布
         q: 第二个分布
@@ -13,11 +13,12 @@ def kl_loss(p, q):
         KL散度损失
     """
     res = p * (torch.log(p + 1e-8) - torch.log(q + 1e-8))
-    return torch.mean(torch.mean(res, dim=(0, 1)), dim=1)
+    # 根据DSCL-master的实现，保持维度信息
+    return res
 
 def sym_kl_loss(p, q):
     """
-    计算对称KL散度损失
+    计算对称KL散度损失，与DSCL-master完全一致
     Args:
         p: 第一个分布
         q: 第二个分布
@@ -28,104 +29,94 @@ def sym_kl_loss(p, q):
 
 class DualStreamContrastiveLoss(nn.Module):
     """
-    双流对比损失模块
+    双流对比损失模块，与DSCL-master完全一致
     """
-    def __init__(self, temperature=0.07):
+    def __init__(self, use_diff_const=False):
         super(DualStreamContrastiveLoss, self).__init__()
-        self.temperature = temperature
+        self.use_diff_const = use_diff_const
         
-    def forward(self, dynamic_features, static_features, dynamic_attn=None, static_attn=None):
+    def forward(self, score_dy, score_st):
         """
-        计算双流对比损失
+        计算双流对比损失，与DSCL-master完全一致
         Args:
-            dynamic_features: 动态流特征 [batch_size, feature_dim]
-            static_features: 静态流特征 [batch_size, feature_dim]
-            dynamic_attn: 动态流注意力分数 [batch_size, n_nodes, n_nodes]
-            static_attn: 静态流注意力分数 [batch_size, n_nodes, n_nodes]
+            score_dy: 动态流注意力分数 [B, n_heads, N, N] 或 [N, N]
+            score_st: 静态流注意力分数 [N, N]
         Returns:
-            total_loss: 总损失
-            adv_loss: 对抗损失
-            con_loss: 对比损失
+            discrepancy: 对称KL散度损失
         """
-        # 计算时间异常分数
-        max_flow = torch.max(dynamic_features, dim=1)[0]
-        flow_ratio = dynamic_features / (max_flow.unsqueeze(1) + 1e-6)
-        time_scores = torch.mean(flow_ratio, dim=-1)
+        if self.use_diff_const:
+            # 与DSCL-master中的diff_const=True逻辑一致
+            discrepancy = sym_kl_loss(score_dy, score_st.detach()) - sym_kl_loss(score_dy.detach(), score_st)
+        else:
+            # 与DSCL-master中的diff_const=False逻辑一致
+            discrepancy = sym_kl_loss(score_dy, score_st)
         
-        # 计算空间异常分数
-        region_flow = torch.mean(dynamic_features, dim=1)
-        region_diff = torch.cdist(region_flow, region_flow)
-        
-        # 计算特征级别的对比损失
-        feature_loss = sym_kl_loss(dynamic_features, static_features)
-        
-        # 如果提供了注意力分数，计算注意力级别的对比损失
-        attn_loss = 0
-        if dynamic_attn is not None and static_attn is not None:
-            # 确保注意力分数维度匹配
-            if dynamic_attn.size() != static_attn.size():
-                min_size = min(dynamic_attn.size(0), static_attn.size(0))
-                dynamic_attn = dynamic_attn[:min_size, :min_size]
-                static_attn = static_attn[:min_size, :min_size]
-            
-            # 计算注意力对比损失
-            attn_loss = sym_kl_loss(dynamic_attn, static_attn)
-        
-        # 计算总损失
-        total_loss = feature_loss + attn_loss
-        
-        # 打印损失信息
-        print("\n" + "="*80)
-        print("【双流对比损失计算】")
-        print(f"特征对比损失: {feature_loss.item():.4f}")
-        if dynamic_attn is not None and static_attn is not None:
-            print(f"注意力对比损失: {attn_loss.item():.4f}")
-        print(f"总损失: {total_loss.item():.4f}")
-        print("="*80 + "\n")
-        
-        return total_loss, feature_loss, attn_loss
+        return discrepancy
 
-def compute_anomaly_score(dynamic_features, static_features, dynamic_attn=None, static_attn=None, temperature=0.07):
+def compute_anomaly_score(score_dy, score_st):
     """
-    计算异常分数
+    计算异常分数，与DSCL-master完全一致
     Args:
-        dynamic_features: 动态流特征
-        static_features: 静态流特征
-        dynamic_attn: 动态流注意力分数
-        static_attn: 静态流注意力分数
-        temperature: 温度参数
+        score_dy: 动态流注意力分数
+        score_st: 静态流注意力分数
     Returns:
         anomaly_score: 异常分数
     """
-    # 计算时间异常分数
-    max_flow = torch.max(dynamic_features, dim=1)[0]
-    flow_ratio = dynamic_features / (max_flow.unsqueeze(1) + 1e-6)
-    time_scores = torch.mean(flow_ratio, dim=-1)
+    # 直接使用对称KL散度作为异常分数，与DSCL-master一致
+    discrepancy = sym_kl_loss(score_dy, score_st)
+    return discrepancy
+
+def compute_dual_stream_loss(score_dy, score_st, use_recon=True, use_const=True, diff_const=False, 
+                           recon_loss=None, loss_weight=None):
+    """
+    计算完整的双流对比损失，与DSCL-master完全一致
+    Args:
+        score_dy: 动态流注意力分数
+        score_st: 静态流注意力分数
+        use_recon: 是否使用重构损失
+        use_const: 是否使用对比损失
+        diff_const: 是否使用差分对比损失
+        recon_loss: 重构损失
+        loss_weight: 损失权重
+    Returns:
+        total_loss: 总损失
+        loss1: 重构损失
+        loss2: 对比损失
+    """
+    loss1 = None
+    loss2 = None
     
-    # 计算空间异常分数
-    region_flow = torch.mean(dynamic_features, dim=1)
-    region_diff = torch.cdist(region_flow, region_flow)
+    if use_recon and recon_loss is not None:
+        loss1 = loss_weight[0] * recon_loss.mean()
     
-    # 计算特征级别的KL散度
-    feature_kl_1 = kl_loss(dynamic_features, static_features.detach())
-    feature_kl_2 = kl_loss(static_features, dynamic_features.detach())
-    feature_sym_kl = (feature_kl_1 + feature_kl_2) / 2
+    if use_const:
+        if diff_const:
+            discrepancy = sym_kl_loss(score_dy, score_st.detach()) - sym_kl_loss(score_dy.detach(), score_st)
+        else:
+            discrepancy = sym_kl_loss(score_dy, score_st)
+        loss2 = loss_weight[1] * discrepancy.mean()
     
-    # 如果提供了注意力分数，计算注意力级别的KL散度
-    attn_sym_kl = 0
-    if dynamic_attn is not None and static_attn is not None:
-        # 确保注意力分数维度匹配
-        if dynamic_attn.size() != static_attn.size():
-            min_size = min(dynamic_attn.size(0), static_attn.size(0))
-            dynamic_attn = dynamic_attn[:min_size, :min_size]
-            static_attn = static_attn[:min_size, :min_size]
-        
-        # 计算注意力级别的KL散度
-        attn_kl_1 = kl_loss(dynamic_attn, static_attn.detach())
-        attn_kl_2 = kl_loss(static_attn, dynamic_attn.detach())
-        attn_sym_kl = (attn_kl_1 + attn_kl_2) / 2
+    # 计算总损失
+    if use_recon and not use_const:
+        total_loss = loss1
+    elif use_const and not use_recon:
+        total_loss = loss2
+    else:
+        total_loss = loss1 + loss2
     
-    # 计算最终的异常分数
-    anomaly_score = (feature_sym_kl + attn_sym_kl + time_scores + region_diff) * temperature
-    
-    return anomaly_score 
+    return total_loss, loss1, loss2
+
+def update_loss_weight(loss1, loss2, loss_weight):
+    """
+    更新损失权重，与DSCL-master完全一致
+    Args:
+        loss1: 重构损失
+        loss2: 对比损失
+        loss_weight: 当前损失权重
+    Returns:
+        new_loss_weight: 更新后的损失权重
+    """
+    exp = torch.tensor([-loss1, -loss2]).exp()
+    new_weight = loss_weight * exp
+    new_loss_weight = new_weight / torch.sum(new_weight)
+    return new_loss_weight 

@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 import math
 from typing import Tuple, Optional
+import os
 
 class DataEmbedding(nn.Module):
     def __init__(self, c_in, d_model, dropout=0.05):
@@ -179,7 +180,8 @@ class TemporalFrequencyMasking(nn.Module):
         masked_indices = torch.zeros(B, num_mask, dtype=torch.long, device=self.device)
         for b in range(B):
             day_mag = mag[b].mean(dim=0)
-            day_masked_idx = day_mag.topk(num_mask, dim=0, sorted=False)[1]
+            # 修改：掩盖幅度最低的频率 (通过对负数取topk实现)
+            _, day_masked_idx = torch.topk(-day_mag, num_mask, dim=0, sorted=False)
             masked_indices[b] = day_masked_idx
         
         # 应用掩码
@@ -224,11 +226,16 @@ class TemporalFrequencyMasking(nn.Module):
         # 频率掩蔽
         frequency_masked_x, frequency_mask_indices = self.frequency_masking(x)
         
-        # 保存掩码后的数据为.npy格式
-        np.save('new_version/temporal_masked_data.npy', temporal_masked_x.detach().cpu().numpy())
-        np.save('new_version/frequency_masked_data.npy', frequency_masked_x.detach().cpu().numpy())
-        np.save('new_version/temporal_mask_indices.npy', temporal_mask_indices.detach().cpu().numpy())
-        np.save('new_version/frequency_mask_indices.npy', frequency_mask_indices.detach().cpu().numpy())
+        # 定义输出目录
+        output_dir = 'data/processed'
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # 保存掩码后的数据和索引到指定目录
+        np.save(os.path.join(output_dir, 'tfm_temporal_masked_data.npy'), temporal_masked_x.detach().cpu().numpy())
+        np.save(os.path.join(output_dir, 'tfm_frequency_masked_data.npy'), frequency_masked_x.detach().cpu().numpy())
+        np.save(os.path.join(output_dir, 'tfm_temporal_mask_indices.npy'), temporal_mask_indices.detach().cpu().numpy())
+        np.save(os.path.join(output_dir, 'tfm_frequency_mask_indices.npy'), frequency_mask_indices.detach().cpu().numpy())
         
         return temporal_masked_x, temporal_mask_indices, frequency_masked_x, frequency_mask_indices
 

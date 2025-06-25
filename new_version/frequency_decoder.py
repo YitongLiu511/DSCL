@@ -4,250 +4,137 @@ import torch.nn.functional as F
 import math
 from typing import Tuple, Optional
 
-class Decoder(nn.Module):
-    def __init__(self, d_model: int, nhead: int = 8, dim_feedforward: int = 2048, dropout: float = 0.1):
-        super().__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.linear1 = nn.Linear(d_model, dim_feedforward)
+class AttentionLayer(nn.Module):
+    """
+    标准自注意力层的正确实现，替代了原有的错误版本。
+    这个版本手动实现了scaled dot-product attention，以确保维度处理的正确性。
+    """
+    def __init__(self, d_model, n_heads=8, d_keys=None, d_values=None, dropout=0.1):
+        super(AttentionLayer, self).__init__()
+        self.n_heads = n_heads
+        self.d_keys = d_keys or (d_model // n_heads)
+        self.d_values = d_values or (d_model // n_heads)
+
+        self.query_projection = nn.Linear(d_model, self.d_keys * self.n_heads)
+        self.key_projection = nn.Linear(d_model, self.d_keys * self.n_heads)
+        self.value_projection = nn.Linear(d_model, self.d_values * self.n_heads)
+        self.out_projection = nn.Linear(self.d_values * self.n_heads, d_model)
+
         self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.norm = nn.LayerNorm(d_model)
 
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
-
-        self.activation = F.relu
-
-    def forward(self, x: torch.Tensor, memory: torch.Tensor) -> torch.Tensor:
-        # x: [B, T, D]
-        # memory: [B, T, D]
+    def forward(self, queries, keys, values):
+        B, L, _ = queries.shape
+        _, S, _ = keys.shape
+        H = self.n_heads
         
-        # 自注意力
-        x2 = self.norm1(x)
-        x2 = x2.transpose(0, 1)  # [T, B, D]
-        x2, _ = self.self_attn(x2, x2, x2)
-        x2 = x2.transpose(0, 1)  # [B, T, D]
-        x = x + self.dropout1(x2)
+        residual = queries
 
-        # 交叉注意力
-        x2 = self.norm2(x)
-        x2 = x2.transpose(0, 1)  # [T, B, D]
-        memory = memory.transpose(0, 1)  # [T, B, D]
-        x2, _ = self.multihead_attn(x2, memory, memory)
-        x2 = x2.transpose(0, 1)  # [B, T, D]
-        x = x + self.dropout2(x2)
+        # 1. Project and split heads
+        q = self.query_projection(queries).view(B, L, H, self.d_keys)
+        k = self.key_projection(keys).view(B, S, H, self.d_keys)
+        v = self.value_projection(values).view(B, S, H, self.d_values)
 
-        # 前馈网络
-        x2 = self.norm3(x)
-        x2 = self.linear2(self.dropout(self.activation(self.linear1(x2))))
-        x = x + self.dropout3(x2)
+        # 2. Transpose for attention calculation
+        q = q.transpose(1, 2)  # (B, H, L, d_keys)
+        k = k.transpose(1, 2)  # (B, H, S, d_keys)
+        v = v.transpose(1, 2)  # (B, H, S, d_values)
 
-        return x
+        # 3. Scaled dot-product attention
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_keys)
+        attn_weights = F.softmax(scores, dim=-1)
+        attn_weights = self.dropout(attn_weights)
+        context = torch.matmul(attn_weights, v)
 
-class FrequencyDecoder(nn.Module):
+        # 4. Concatenate heads and project back
+        context = context.transpose(1, 2).contiguous().view(B, L, -1)
+        output = self.out_projection(context)
+        
+        # 5. Residual connection and layer norm
+        return self.norm(residual + self.dropout(output)), attn_weights
+
+class Encoder(nn.Module):
+    """
+    通用编码器模块，由多个注意力层堆叠而成。
+    现在会同时返回每一层的特征输出和注意力权重。
+    """
+    def __init__(self, attn_layers, norm_layer=None):
+        super(Encoder, self).__init__()
+        self.attn_layers = nn.ModuleList(attn_layers)
+        self.norm = norm_layer
+
+    def forward(self, x):
+        # x [B, T, D]
+        outlist = []
+        attlist = []
+        for attn_layer in self.attn_layers:
+            x, attn = attn_layer(x, x, x)
+            outlist.append(x)
+            attlist.append(attn)
+
+        if self.norm is not None:
+            x = self.norm(x)
+
+        # 返回最终输出，以及每一层的特征输出列表和注意力权重列表
+        return x, outlist, attlist
+
+class FrequencyEncoder(nn.Module):
+    """
+    频率编码器，模仿 FreEnc 的设计。
+    现在 forward 方法会解包并返回特征列表和注意力列表。
+    """
     def __init__(
         self,
+        c_in: int = 2,
         d_model: int = 256,
         n_heads: int = 8,
-        dim_fc: int = 128,
-        dropout: float = 0.1,
-        n_layers: int = 3,
-        device: str = 'cpu'
+        e_layers: int = 3,
+        dropout: float = 0.1
     ):
-        super(FrequencyDecoder, self).__init__()
-        self.device = device
-        self.d_model = d_model
+        super(FrequencyEncoder, self).__init__()
         
-        # 修改输入投影层维度为2，因为输入特征是2维的
-        self.input_projection = nn.Linear(2, d_model).to(device)
+        # 输入投影层
+        self.input_projection = nn.Linear(c_in, d_model)
         
-        # 多层解码器
-        self.layers = nn.ModuleList([
-            DecoderLayer(
-                d_model=d_model,
-                n_heads=n_heads,
-                dim_fc=dim_fc,
-                dropout=dropout
-            ).to(device) for _ in range(n_layers)
-        ])
+        # 核心编码器
+        self.encoder = Encoder(
+            [
+                AttentionLayer(d_model, n_heads, dropout=dropout) for _ in range(e_layers)
+            ],
+            norm_layer=nn.LayerNorm(d_model)
+        )
         
-        # 修改输出投影层维度为2，因为输出特征也是2维的
+        # 输出投影层，用于最终的注意力计算
         self.output_projection = nn.Sequential(
             nn.Linear(d_model, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, 2)
-        ).to(device)
+            nn.GELU(),
+            nn.Linear(d_model, d_model),
+            nn.Sigmoid()
+        )
 
-    def forward(self, x, frequency_masked_x):
+    def forward(self, x):
         """
-        处理频域掩码数据
+        处理经过频率掩码和逆变换后的数据
         
         Args:
-            x: 原始输入数据 [B, T, D]
-            frequency_masked_x: 频域掩码后的数据 [B, T, D]
+            x: 输入数据 [B, T, C] (例如 B, T, 2)
             
         Returns:
-            output: 解码后的数据 [B, T, D]
-            attention_weights: 注意力权重列表
+            Tuple[list, list]:
+                - feature_outputs (list): 包含每一层特征输出的列表
+                - attention_weights (list): 包含每一层注意力权重的列表
         """
-        # 确保输入在正确的设备上
-        x = x.to(self.device)
-        frequency_masked_x = frequency_masked_x.to(self.device)
+        # 1. 输入投影: [B, T, C] -> [B, T, D]
+        x_emb = self.input_projection(x)
         
-        # 输入投影
-        x = self.input_projection(x)  # [B, T, d_model]
-        frequency_masked_x = self.input_projection(frequency_masked_x)  # [B, T, d_model]
+        # 2. 编码: 返回最终输出、层级特征列表、层级注意力列表
+        _, feature_outputs, attention_weights = self.encoder(x_emb)
         
-        # 存储所有层的注意力权重
-        attention_weights = []
+        # 注意：原代码的 final_projection 在这里可能不再需要，
+        # 因为我们现在关心的是编码器内部的特征。
+        # 为了保持接口清晰，我们暂时只返回编码器的直接输出。
         
-        # 通过多层解码器
-        for layer in self.layers:
-            x, attn_weights = layer(x, frequency_masked_x)
-            attention_weights.append(attn_weights)
-        
-        # 输出投影
-        output = self.output_projection(x)  # [B, T, 2]
-        
-        return output, attention_weights
-
-class DecoderLayer(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        n_heads: int,
-        dim_fc: int,
-        dropout: float
-    ):
-        super(DecoderLayer, self).__init__()
-        
-        # 自注意力层
-        self.self_attention = nn.MultiheadAttention(
-            embed_dim=d_model,
-            num_heads=n_heads,
-            dropout=dropout,
-            batch_first=True
-        )
-        
-        # 交叉注意力层
-        self.cross_attention = nn.MultiheadAttention(
-            embed_dim=d_model,
-            num_heads=n_heads,
-            dropout=dropout,
-            batch_first=True
-        )
-        
-        # 前馈网络
-        self.feed_forward = nn.Sequential(
-            nn.Linear(d_model, dim_fc),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(dim_fc, d_model)
-        )
-        
-        # 层归一化
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
-        
-        self.dropout = nn.Dropout(dropout)
-        
-    def forward(self, x, frequency_masked_x):
-        """
-        解码器层的前向传播
-        
-        Args:
-            x: 原始输入 [B, T, D]
-            frequency_masked_x: 频域掩码输入 [B, T, D]
-            
-        Returns:
-            output: 处理后的数据 [B, T, D]
-            attention_weights: 注意力权重
-        """
-        # 自注意力
-        residual = x
-        x = self.norm1(x)
-        x, self_attn_weights = self.self_attention(x, x, x)
-        x = self.dropout(x)
-        x = residual + x
-        
-        # 交叉注意力
-        residual = x
-        x = self.norm2(x)
-        x, cross_attn_weights = self.cross_attention(x, frequency_masked_x, frequency_masked_x)
-        x = self.dropout(x)
-        x = residual + x
-        
-        # 前馈网络
-        residual = x
-        x = self.norm3(x)
-        x = self.feed_forward(x)
-        x = self.dropout(x)
-        x = residual + x
-        
-        return x, (self_attn_weights, cross_attn_weights)
-
-def process_frequency_masked_data(masked_data, original_data, d_model=256, n_heads=8, dim_fc=128, device='cpu'):
-    """
-    处理频域掩码数据
-    
-    Args:
-        masked_data: 频域掩码后的数据 [B, T, D]
-        original_data: 原始数据 [B, T, D]
-        d_model: 模型维度
-        n_heads: 注意力头数
-        dim_fc: 前馈网络维度
-        device: 设备类型
-        
-    Returns:
-        processed_data: 处理后的数据 [B, T, D]
-        attention_weights: 注意力权重列表
-    """
-    print("\n=== 开始频域解码处理 ===")
-    print(f"输入形状: {masked_data.shape}")
-    print(f"参数设置: d_model={d_model}, n_heads={n_heads}, dim_fc={dim_fc}, device={device}")
-    
-    # 确保输入数据在CPU上
-    masked_data = masked_data.cpu()
-    original_data = original_data.cpu()
-    
-    # 创建解码器
-    print("\n初始化频域解码器...")
-    decoder = FrequencyDecoder(
-        d_model=d_model,
-        n_heads=n_heads,
-        dim_fc=dim_fc,
-        device=device
-    ).to(device)
-    
-    # 处理数据
-    print("\n开始处理数据...")
-    with torch.no_grad():
-        processed_data, attention_weights = decoder(original_data, masked_data)
-        print(f"解码器输出形状: {processed_data.shape}")
-        print(f"注意力权重数量: {len(attention_weights)}")
-        for i, (self_attn, cross_attn) in enumerate(attention_weights):
-            print(f"  第 {i+1} 层自注意力权重形状: {self_attn.shape}")
-            print(f"  第 {i+1} 层交叉注意力权重形状: {cross_attn.shape}")
-    
-    print("\n=== 频域解码处理完成 ===")
-    return processed_data, attention_weights
-
-def load_frequency_masked_data(file_path: str) -> torch.Tensor:
-    """
-    加载频域掩码后的数据
-    
-    Args:
-        file_path: 数据文件路径
-        
-    Returns:
-        加载的张量
-    """
-    return torch.load(file_path)
+        return feature_outputs, attention_weights
 
 def main():
     # 设置参数
@@ -258,10 +145,11 @@ def main():
     dropout = 0.1
     
     # 创建模型
-    model = FrequencyDecoder(
+    model = FrequencyEncoder(
+        c_in=2,
         d_model=d_model,
         n_heads=nhead,
-        dim_fc=dim_feedforward,
+        e_layers=num_decoder_layers,
         dropout=dropout
     )
     
@@ -270,10 +158,10 @@ def main():
     original_data = load_frequency_masked_data('path_to_your_original_data.pt')
     
     # 前向传播
-    output, attention_weights = model(original_data, masked_data)
+    feature_outputs, attention_weights = model(original_data)
     
     # 保存输出
-    torch.save(output, 'decoder_output.pt')
+    torch.save(feature_outputs, 'feature_outputs.pt')
     torch.save(attention_weights, 'attention_weights.pt')
 
 if __name__ == '__main__':
