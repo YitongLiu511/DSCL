@@ -1,3 +1,0 @@
-"""
-STAnomalyFormer model package initialization
-""" 

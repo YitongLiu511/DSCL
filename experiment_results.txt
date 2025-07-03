@@ -1,9 +1,0 @@
-Traceback (most recent call last):
-  File "/workspace/DSCL/DSCL-master/exper_nyc.py", line 2, in <module>
-    from STAnomalyFormer.interface.estimator import STAnomalyFormerDetector_v4, TemporalTSFMDetector
-  File "/workspace/DSCL/DSCL-master/STAnomalyFormer/interface/estimator.py", line 15, in <module>
-    from ..model.anomaly import (
-  File "/workspace/DSCL/DSCL-master/STAnomalyFormer/model/anomaly.py", line 94
-    return output, score_dy, score_st
-    ^
-IndentationError: expected an indented block after 'else' statement on line 93

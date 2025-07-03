@@ -36,11 +36,19 @@ class MultiheadAttention(nn.Module):
     def forward(self, x, y):
         '''x : (B, L, D)'''
         B, L, _ = x.shape
-        Q = self.q(x).reshape(B, L, self.n_heads, -1)  # (B, L, n_heads, dim_k)
-        K = self.k(x).reshape(B, L, self.n_heads, -1)  # (B, L, n_heads, dim_k)
-        V = self.v(y).reshape(B, L, self.n_heads, -1)  # (B, L, n_heads, dim_v)
-        output, scores = self.attention(Q, K, V)
-        return self.o(output), scores
+        # print("[TemporalAttn] input x mean/std:", x.mean().item(), x.std().item())
+        Q = self.q(x).reshape(B, L, self.n_heads, -1)
+        K = self.k(x).reshape(B, L, self.n_heads, -1)
+        V = self.v(y).reshape(B, L, self.n_heads, -1)
+        # 放大Q/K
+        Q = Q * 5
+        K = K * 5
+        scores = torch.einsum("blhe,bshe->bhls", Q, K) * self.norm_fact
+        # print("[TemporalAttn] scores mean/std/max/min:", scores.mean().item(), scores.std().item(), scores.max().item(), scores.min().item())
+        attn_weights = scores.softmax(dim=-1)
+        # print("[TemporalAttn] attn_weights mean/std/max/min:", attn_weights.mean().item(), attn_weights.std().item(), attn_weights.max().item(), attn_weights.min().item())
+        output = torch.einsum("bhls,bshd->blhd", attn_weights, V).reshape(B, L, -1)
+        return self.o(output), attn_weights
 
 class TemporalTransformer(nn.Module):
     def __init__(
