@@ -37,4 +37,4 @@ class SpatialSelfAttentionBlock(nn.Module):
         context = torch.matmul(attn_weights, v)
         context = context.transpose(1, 2).contiguous().view(B, N, -1)
         output = self.out_proj(context)
-        return output, attn_weights 
+        return output, attn_weights
