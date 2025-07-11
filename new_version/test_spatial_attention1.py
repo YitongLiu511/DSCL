@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import os
-from spatial_attention1 import process_dynamic_stream_data
+from spatial_attention1 import SpatialSelfAttentionBlock
 
 def test_spatial_attention1():
     print("=== 测试 spatial_attention1.py 动态流处理 ===")
@@ -123,5 +123,41 @@ def main():
         print("错误详情:")
         print(traceback.format_exc())
 
+def test_spatial_attention_pipeline():
+    print("--- 测试时空特征串联 Pipeline ---")
+    # 1. 加载时域特征
+    features = np.load('temporal_attention_features.npy')  # [节点数, 时间步, 特征数]
+    print(f"加载时域特征 shape: {features.shape}")
+    # 如空间注意力模块需要 [时间步, 节点数, 特征数]，则转置
+    if features.shape[0] < features.shape[1]:
+        features = features.transpose(1, 0, 2)
+        print(f"转置后 shape: {features.shape}")
+    # 转为torch张量
+    features_tensor = torch.from_numpy(features).float()
+    # 2. 初始化空间自注意力模块
+    d_model = features_tensor.shape[-1]
+    # 自动选择合适的n_heads
+    for n_heads in [4, 2, 1]:
+        if d_model % n_heads == 0:
+            break
+    else:
+        raise ValueError(f"d_model={d_model} 不能被常见n_heads整除")
+    spatial_model = SpatialSelfAttentionBlock(d_model=d_model, n_heads=n_heads)
+    # 3. 前向传播
+    spatial_out, spatial_attn = spatial_model(features_tensor)
+    print(f"空间自注意力输出 shape: {spatial_out.shape}")
+    print(f"空间注意力权重 shape: {spatial_attn.shape}")
+    
+    # 4. 调换维度以适配temporal_decoder输入格式
+    # 从 [时间步, 节点数, 特征数] 调换为 [节点数, 时间步, 特征数]
+    spatial_out_transposed = spatial_out.transpose(0, 1)
+    print(f"调换维度后 shape: {spatial_out_transposed.shape}")
+    
+    # 5. 保存调换后的特征，供temporal_decoder使用
+    np.save('spatial_attention_features_transposed.npy', spatial_out_transposed.detach().numpy())
+    print("已保存调换后的空间注意力特征到 spatial_attention_features_transposed.npy")
+    
+    print("--- 测试完成 ---")
+
 if __name__ == '__main__':
-    main() 
+    test_spatial_attention_pipeline() 

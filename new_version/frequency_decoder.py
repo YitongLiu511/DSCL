@@ -78,67 +78,71 @@ class Encoder(nn.Module):
         # 返回最终输出，以及每一层的特征输出列表和注意力权重列表
         return x, outlist, attlist
 
+class PositionalEmbedding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super(PositionalEmbedding, self).__init__()
+        pe = torch.zeros(max_len, d_model).float()
+        pe.require_grad = False
+        position = torch.arange(0, max_len).float().unsqueeze(1)
+        div_term = (torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)).exp()
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+    def forward(self, data=None, idx=None):
+        if data is not None:
+            p = self.pe[:data].unsqueeze(0)
+        else:
+            p = self.pe.unsqueeze(0).repeat(idx.shape[0],1,1)[torch.arange(idx.shape[0])[:,None],idx,:]
+        return p
+
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model, n_heads, d_ff=None, dropout=0.1):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        d_ff = d_ff or d_model * 4
+        self.ffn = nn.Sequential(
+            nn.Linear(d_model, d_ff),
+            nn.ReLU(),
+            nn.Linear(d_ff, d_model),
+            nn.Dropout(dropout)
+        )
+    def forward(self, x):
+        attn_out, _ = self.attn(x, x, x)
+        x = self.norm1(x + attn_out)
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + ffn_out)
+        return x
+
 class FrequencyEncoder(nn.Module):
-    """
-    频率编码器，模仿 FreEnc 的设计。
-    现在 forward 方法会解包并返回特征列表和注意力列表。
-    """
     def __init__(
         self,
         c_in: int = 2,
-        d_model: int = 256,
+        d_model: int = 64,
         n_heads: int = 8,
         e_layers: int = 3,
         dropout: float = 0.1
     ):
         super(FrequencyEncoder, self).__init__()
-        
-        # 输入投影层
         self.input_projection = nn.Linear(c_in, d_model)
-        
-        # 核心编码器
-        self.encoder = Encoder(
-            [
-                AttentionLayer(d_model, n_heads, dropout=dropout) for _ in range(e_layers)
-            ],
-            norm_layer=nn.LayerNorm(d_model)
-        )
-        
-        # 输出投影层，用于最终的注意力计算
-        self.output_projection = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.GELU(),
-            nn.Linear(d_model, d_model),
-            nn.Sigmoid()
-        )
-
+        self.position_embedding = PositionalEmbedding(d_model=d_model)
+        self.layers = nn.ModuleList([
+            TransformerBlock(d_model, n_heads, d_model*4, dropout) for _ in range(e_layers)
+        ])
+        self.norm = nn.LayerNorm(d_model)
     def forward(self, x):
-        """
-        处理经过频率掩码和逆变换后的数据
-        
-        Args:
-            x: 输入数据 [B, T, C] (例如 B, T, 2)
-            
-        Returns:
-            Tuple[list, list]:
-                - feature_outputs (list): 包含每一层特征输出的列表
-                - attention_weights (list): 包含每一层注意力权重的列表
-        """
-        # 1. 输入投影: [B, T, C] -> [B, T, D]
+        # print('FrequencyEncoder 输入 x 的 shape:', x.shape)
         x_emb = self.input_projection(x)
-        
-        # 2. 编码: 返回最终输出、层级特征列表、层级注意力列表
-        _, feature_outputs, attention_weights = self.encoder(x_emb)
-        
-        # 注意：原代码的 final_projection 在这里可能不再需要，
-        # 因为我们现在关心的是编码器内部的特征。
-        # 为了保持接口清晰，我们暂时只返回编码器的直接输出。
-        
-        return feature_outputs, attention_weights
+        x_emb = x_emb + self.position_embedding(data=x_emb.shape[1])
+        for layer in self.layers:
+            x_emb = layer(x_emb)
+        x_emb = self.norm(x_emb)
+        return x_emb  # [B, T, D]
 
 def main():
     # 设置参数
-    d_model = 512
+    d_model = 64
     nhead = 8
     num_decoder_layers = 6
     dim_feedforward = 2048
@@ -161,8 +165,7 @@ def main():
     feature_outputs, attention_weights = model(original_data)
     
     # 保存输出
-    torch.save(feature_outputs, 'feature_outputs.pt')
-    torch.save(attention_weights, 'attention_weights.pt')
+
 
 if __name__ == '__main__':
     main() 

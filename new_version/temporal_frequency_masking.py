@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import numpy as np
 import math
 from typing import Tuple, Optional
-import os
 
 class DataEmbedding(nn.Module):
     def __init__(self, c_in, d_model, dropout=0.05):
@@ -98,27 +97,54 @@ class TemporalFrequencyMasking(nn.Module):
         if x.ndim != 3:
             raise ValueError(f"输入张量维度应为3，实际为{x.ndim}")
         N, T, C = x.shape
-        ex = self.emb(x)  # [N, T, D]
-        filters = torch.ones(1, 1, self.window_size, device=self.device)
-        ex2 = ex ** 2
-        ltr = F.conv1d(ex.transpose(1,2).reshape(-1, ex.shape[1]).unsqueeze(1), filters, padding=self.window_size-1)
-        ltr[:,:,:self.window_size-1] /= torch.arange(1, self.window_size, device=self.device)
-        ltr[:,:,self.window_size-1:] /= self.window_size
-        ltr2 = F.conv1d(ex2.transpose(1,2).reshape(-1, ex2.shape[1]).unsqueeze(1), filters, padding=self.window_size-1)
-        ltr2[:,:,:self.window_size-1] /= torch.arange(1, self.window_size, device=self.device)
-        ltr2[:,:,self.window_size-1:] /= self.window_size
-        ltrd = (ltr2 - ltr ** 2)[:,:,:ltr.shape[-1]-self.window_size+1].squeeze(1).reshape(ex.shape[0],ex.shape[-1],-1).transpose(1,2)
-        ltrm = ltr[:,:,:ltr.shape[-1]-self.window_size+1].squeeze(1).reshape(ex.shape[0],ex.shape[-1],-1).transpose(1,2)
-        score = ltrd.sum(-1) / (ltrm.sum(-1) + 1e-6)
-        num_mask = int(T * self.temporal_mask_ratio)
+        
+        # 对每个特征分别计算统计量
+        x_masked = x.clone()  # 复制原始数据
+        num_mask = min(int(T * self.temporal_mask_ratio), T)  # 确保不超过时间步数
         masked_indices = torch.zeros(N, num_mask, dtype=torch.long, device=self.device)
-        for n in range(N):
-            masked_idx = score[n].topk(num_mask, dim=0, sorted=False)[1]
-            masked_indices[n] = masked_idx
-        tokens = ex.clone()
-        for n in range(N):
-            tokens[n, masked_indices[n]] = self.temporal_mask_token + self.pos_emb(masked_indices[n])
-        return tokens, masked_indices
+        
+        for c in range(C):
+            # 计算滑动窗口统计量
+            x_feature = x[:,:,c]  # [N, T]
+            x_feature_2 = x_feature ** 2
+            
+            # 使用卷积计算滑动平均
+            filters = torch.ones(1, 1, self.window_size, device=self.device)
+            ltr = F.conv1d(x_feature.unsqueeze(1), filters, padding=self.window_size-1)
+            ltr2 = F.conv1d(x_feature_2.unsqueeze(1), filters, padding=self.window_size-1)
+            
+            # 归一化
+            ltr[:,:,:self.window_size-1] /= torch.arange(1, self.window_size, device=self.device)
+            ltr[:,:,self.window_size-1:] /= self.window_size
+            ltr2[:,:,:self.window_size-1] /= torch.arange(1, self.window_size, device=self.device)
+            ltr2[:,:,self.window_size-1:] /= self.window_size
+            
+            # 计算方差
+            ltrd = (ltr2 - ltr ** 2)[:,:,:ltr.shape[-1]-self.window_size+1].squeeze(1)
+            ltrm = ltr[:,:,:ltr.shape[-1]-self.window_size+1].squeeze(1)
+            
+            # 计算异常分数
+            score = ltrd.sum(-1) / (ltrm.sum(-1) + 1e-6)
+            
+            # 选择掩码位置
+            for n in range(N):
+                if c == 0:  # 只在第一个特征时计算掩码位置
+                    # 确保不会超出范围
+                    score_len = score[n].numel() if score[n].dim() > 0 else 1
+                    actual_num_mask = min(num_mask, score_len)
+                    if actual_num_mask > 0:
+                        masked_idx = score[n].topk(actual_num_mask, dim=0, sorted=False)[1]
+                        masked_indices[n, :actual_num_mask] = masked_idx
+                
+                # 应用可学习掩码标记
+                if c == 0 and masked_indices[n, 0] != 0:  # 确保有掩码位置
+                    # 使用可学习的掩码标记替换被掩码的值
+                    mask_token = self.temporal_mask_token[0, 0, :]  # [d_model]
+                    # 将掩码标记投影到当前特征维度
+                    mask_value = self.temporal_projection(mask_token.unsqueeze(0))[0, c]  # 标量
+                    x_masked[n, masked_indices[n, :actual_num_mask], c] = mask_value
+        
+        return x_masked, masked_indices
     
     def frequency_masking(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -132,21 +158,40 @@ class TemporalFrequencyMasking(nn.Module):
         if x.ndim != 3:
             raise ValueError(f"输入张量维度应为3，实际为{x.ndim}")
         N, T, C = x.shape
-        ex = self.emb(x)  # [N, T, D]
-        cx = torch.fft.rfft(ex.transpose(1,2))  # [N, D, Freq]
-        mag = torch.sqrt(cx.real ** 2 + cx.imag ** 2)  # [N, D, Freq]
-        quantile = torch.quantile(mag, self.frequency_mask_ratio, dim=2, keepdim=True)
-        idx = torch.argwhere(mag < quantile)
-        mask_token = self.frequency_mask_token.repeat(N, cx.shape[1], mag.shape[-1])
-        cx[mag < quantile] = mask_token[idx[:,0], idx[:,1], idx[:,2]]
-        ix = torch.fft.irfft(cx).transpose(1,2)  # [N, T, D]
-        return ix, mag < quantile
+        # 对每个特征分别做rfft和掩码
+        x_masked = torch.zeros_like(x)
+        mask_indices = torch.zeros((N, C, T//2+1), dtype=torch.bool, device=self.device)
+        for c in range(C):
+            # [N, T] -> [N, Freq]
+            cx = torch.fft.rfft(x[:,:,c])
+            mag = torch.abs(cx)  # [N, Freq]
+            quantile = torch.quantile(mag, self.frequency_mask_ratio, dim=1, keepdim=True)  # [N, 1]
+            mask = mag < quantile  # [N, Freq]
+            mask_indices[:,c,:] = mask
+            # 使用可学习掩码标记
+            cx_masked = cx.clone()
+            # 获取可学习的频率掩码标记
+            freq_mask_token = self.frequency_mask_token[0, :, 0]  # [d_model]
+            # 将掩码标记投影到合适的维度
+            mask_values = self.frequency_projection(freq_mask_token.unsqueeze(-1).float())  # [d_model, 1]
+            # 使用投影后的值替换被掩码的频率
+            for n in range(N):
+                if mask[n].any():  # 如果有掩码位置
+                    # 选择掩码位置对应的值
+                    mask_positions = torch.where(mask[n])[0]
+                    for pos in mask_positions:
+                        if pos < len(mask_values):
+                            cx_masked[n, pos] = mask_values[pos, 0]
+            # 逆变换
+            ix = torch.fft.irfft(cx_masked, n=T)  # [N, T]
+            x_masked[:,:,c] = ix
+        return x_masked, mask_indices
     
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         前向传播
         Args:
-            x: 输入张量 [B, T, N, F]
+            x: 输入张量 [N, T, F]
         Returns:
             时间掩蔽后的张量、时间掩蔽位置、频率掩蔽后的张量、频率掩蔽位置
         """
@@ -155,17 +200,6 @@ class TemporalFrequencyMasking(nn.Module):
         
         # 频率掩蔽
         frequency_masked_x, frequency_mask_indices = self.frequency_masking(x)
-        
-        # 定义输出目录
-        output_dir = 'data/processed'
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        # 保存掩码后的数据和索引到指定目录
-        np.save(os.path.join(output_dir, 'tfm_temporal_masked_data.npy'), temporal_masked_x.detach().cpu().numpy())
-        np.save(os.path.join(output_dir, 'tfm_frequency_masked_data.npy'), frequency_masked_x.detach().cpu().numpy())
-        np.save(os.path.join(output_dir, 'tfm_temporal_mask_indices.npy'), temporal_mask_indices.detach().cpu().numpy())
-        np.save(os.path.join(output_dir, 'tfm_frequency_mask_indices.npy'), frequency_mask_indices.detach().cpu().numpy())
         
         return temporal_masked_x, temporal_mask_indices, frequency_masked_x, frequency_mask_indices
 

@@ -2,6 +2,71 @@ import torch
 from torch import nn
 import math
 import torch.nn.functional as F
+import numpy as np
+
+class PositionalEmbedding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super(PositionalEmbedding, self).__init__()
+        pe = torch.zeros(max_len, d_model).float()
+        pe.require_grad = False
+        position = torch.arange(0, max_len).float().unsqueeze(1)
+        div_term = (torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)).exp()
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+    def forward(self, idx):
+        return self.pe[idx]
+
+# 1. 读取掩码数据和掩码索引
+masked_data = np.load('data/datanew/temporal_masked.npy')
+mask_indices = np.load('data/datanew/temporal_mask_indices.npy')  # [num_nodes, 掩码数]
+
+if masked_data.ndim == 3:
+    # [num_nodes, num_time, num_features]
+    num_nodes, num_time, num_features = masked_data.shape
+    all_time = num_time
+elif masked_data.ndim == 4:
+    # [天, 槽, 节点, 特征]
+    num_days, num_time, num_nodes, num_features = masked_data.shape
+    masked_data = masked_data.transpose(2, 0, 1, 3).reshape(num_nodes, num_days * num_time, num_features)
+    all_time = num_days * num_time
+else:
+    raise ValueError("masked_data shape 不支持")
+
+unmasked_mask = np.ones((num_nodes, all_time), dtype=bool)
+for node in range(num_nodes):
+    unmasked_mask[node, mask_indices[node]] = False
+
+# 3. 定义位置编码函数
+
+def get_positional_encoding(seq_len, d_model):
+    pe = np.zeros((seq_len, d_model), dtype=np.float32)
+    position = np.arange(0, seq_len)[:, np.newaxis]
+    div_term = np.exp(np.arange(0, d_model, 2) * -(math.log(10000.0) / d_model))
+    pe[:, 0::2] = np.sin(position * div_term)
+    pe[:, 1::2] = np.cos(position * div_term)
+    return pe
+
+# 4. 给未掩码和掩码部分分别添加位置编码
+unmasked_data = []
+for node in range(num_nodes):
+    node_unmask_idx = np.where(unmasked_mask[node])[0]
+    node_unmask = masked_data[node, node_unmask_idx, :]  # [未掩码数, 特征数]
+    pe = get_positional_encoding(len(node_unmask_idx), node_unmask.shape[1])
+    node_unmask_pe = node_unmask + pe
+    unmasked_data.append(node_unmask_pe)
+# unmasked_data: list，每个元素是该节点未掩码部分加了位置编码的数据
+
+masked_data_list = []
+for node in range(num_nodes):
+    node_mask_idx = mask_indices[node]
+    node_mask = masked_data[node, node_mask_idx, :]  # [掩码数, 特征数]
+    pe = get_positional_encoding(len(node_mask_idx), node_mask.shape[1])
+    node_mask_pe = node_mask + pe
+    masked_data_list.append(node_mask_pe)
+# masked_data_list: list，每个元素是该节点掩码部分加了位置编码的数据
+
+# 5. 后续可将unmasked_data送入attention编码器
 
 class MultiheadAttention(nn.Module):
     '''For the shape (B, L, D)'''
@@ -36,6 +101,12 @@ class MultiheadAttention(nn.Module):
     def forward(self, x, y):
         '''x : (B, L, D)'''
         B, L, _ = x.shape
+        # 确保所有模块都在输入设备上
+        self.q = self.q.to(x.device)
+        self.k = self.k.to(x.device)
+        self.v = self.v.to(x.device)
+        self.o = self.o.to(x.device)
+        
         # print("[TemporalAttn] input x mean/std:", x.mean().item(), x.std().item())
         Q = self.q(x).reshape(B, L, self.n_heads, -1)
         K = self.k(x).reshape(B, L, self.n_heads, -1)
@@ -105,12 +176,17 @@ class TemporalAttentionProcessor(nn.Module):
         n_heads: int = 4,
         dim_fc: int = 64,
         device: str = 'cpu',
+        input_dim: int = 2,  # 新增参数，默认为2
     ):
         super().__init__()
         self.device = device
+        self.input_dim = input_dim
         
         # 输入投影层，将输入维度转换为d_model
-        self.input_projection = nn.Linear(2, d_model).to(device)  # 2是特征数
+        self.input_projection = nn.Linear(input_dim, d_model).to(device)
+        
+        # 位置编码层
+        self.positional_embedding = PositionalEmbedding(d_model).to(device)
         
         # 多层时间注意力块
         self.attention_layers = nn.ModuleList([
@@ -122,7 +198,7 @@ class TemporalAttentionProcessor(nn.Module):
         self.output_projection = nn.Sequential(
             nn.Linear(d_model, d_model),
             nn.ReLU(),
-            nn.Linear(d_model, 2)  # 输出维度改回2
+            nn.Linear(d_model, input_dim)  # 输出维度与输入维度一致
         ).to(device)
         
     def forward(self, x):
@@ -142,14 +218,25 @@ class TemporalAttentionProcessor(nn.Module):
         # 确保输入在正确的设备上
         x = x.to(self.device)
         
+        # 确保所有模块都在输入设备上
+        self.input_projection = self.input_projection.to(x.device)
+        self.positional_embedding = self.positional_embedding.to(x.device)
+        self.output_projection = self.output_projection.to(x.device)
+        
         # 输入投影
         x = self.input_projection(x)  # [263, 2016, d_model]
+        
+        # 添加位置编码
+        T = x.shape[1]  # 时间步长
+        pos_emb = self.positional_embedding(torch.arange(T, device=x.device))  # [T, d_model]
+        x = x + pos_emb.unsqueeze(0)  # [263, 2016, d_model]
         
         # 存储所有层的注意力权重
         attention_weights = []
         
         # 通过多层时间注意力块
         for layer in self.attention_layers:
+            layer = layer.to(x.device)  # 确保层在正确设备上
             x, attn = layer(x)
             attention_weights.append(attn)
         
@@ -169,6 +256,13 @@ class TemporalAttentionLayer(nn.Module):
         self.dropout = nn.Dropout(0.1)
     
     def forward(self, x):
+        # 确保所有模块都在输入设备上
+        self.attn = self.attn.to(x.device)
+        self.fc1 = self.fc1.to(x.device)
+        self.fc2 = self.fc2.to(x.device)
+        self.norm1 = self.norm1.to(x.device)
+        self.norm2 = self.norm2.to(x.device)
+        
         x_, attn = self.attn(x, x)
         x = self.norm1(x + self.dropout(x_))
         x_ = self.fc2(F.relu(self.fc1(x)))
@@ -196,7 +290,7 @@ def preprocess_masked_data(masked_data):
     
     return x
 
-def process_temporal_masked_data(data, d_model=256, dim_k=32, dim_v=32, n_heads=4, dim_fc=64, device='cpu'):
+def process_temporal_masked_data(data, d_model=256, dim_k=32, dim_v=32, n_heads=4, dim_fc=64, device='cpu', input_dim=2):
     """
     处理时间掩码后的数据
     Args:
@@ -207,6 +301,7 @@ def process_temporal_masked_data(data, d_model=256, dim_k=32, dim_v=32, n_heads=
         n_heads: 注意力头数
         dim_fc: 前馈网络维度
         device: 设备
+        input_dim: 输入特征维度
     Returns:
         processed_data: 处理后的数据
         attention_weights: 注意力权重
@@ -221,7 +316,8 @@ def process_temporal_masked_data(data, d_model=256, dim_k=32, dim_v=32, n_heads=
         dim_v=dim_v,
         n_heads=n_heads,
         dim_fc=dim_fc,
-        device=device
+        device=device,
+        input_dim=input_dim
     )
     
     # 处理数据

@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 import math
-from .temporal_attention import process_temporal_masked_data
+from .temporal_attention import process_temporal_masked_data, TemporalAttentionProcessor
 import torch.nn as nn
 import os
 
@@ -105,6 +105,23 @@ class MultipleGCN(torch.nn.Module):
         )
         self.mat_2 = matrices.square()
         self.mask = self.generate_mask()
+        
+        # 新增：内部时间注意力机制
+        self.temporal_attention = TemporalAttentionProcessor(
+            d_model=out_channels,
+            dim_k=32,
+            dim_v=32,
+            n_heads=4,
+            dim_fc=64,
+            device='cpu',
+            input_dim=out_channels  # 使用out_channels作为输入维度
+        )
+        
+        # 新增：内部门控融合机制（用于重构损失）
+        # 按照DSCL-master (1)的实现方式
+        self.dynamic_proj = nn.Linear(out_channels, out_channels)
+        self.static_proj = nn.Linear(out_channels, out_channels)
+        self.reconstruction_projection = nn.Linear(out_channels, in_channels)  # 投影回原始维度
 
     def generate_mask(self):
         # 距离为0的位置设为1，对角线设为0，与DSCL-master保持一致
@@ -126,14 +143,52 @@ class MultipleGCN(torch.nn.Module):
         return prior
 
     def forward(self, x):
-        # 直接对整个批次处理，与DSCL-master保持一致
-        prior = self.STS  # [N, N]
+        # 只支持 [N, T, C] 输入
+        assert len(x.shape) == 3, 'MultipleGCN 只支持 [N, T, C] 输入'
+        N, T, C = x.shape
+        device = x.device
         
+        # 确保所有模块都在正确设备上
+        self.temporal_attention = self.temporal_attention.to(device)
+        self.dynamic_proj = self.dynamic_proj.to(device)
+        self.static_proj = self.static_proj.to(device)
+        self.reconstruction_projection = self.reconstruction_projection.to(device)
+        
+        # 确保所有线性层都在正确设备上
         for i in range(self.n_layers):
-            wx = prior @ x  # [B, N, C]
+            self.linears[i] = self.linears[i].to(device)
+        
+        prior = self.STS.to(device)  # [N, N]
+        
+        # 1. 图卷积处理
+        for i in range(self.n_layers):
+            wx = prior @ x  # [N, T, C]
             x = self.activation(self.linears[i](wx))
         
-        return x, prior
+        # 2. 内部时间注意力机制
+        # x: [N, T, C]
+        batch_size = 10
+        temporal_outputs = []
+        for start in range(0, N, batch_size):
+            end = min(start + batch_size, N)
+            batch_x = x[start:end]  # [batch_size, T, C]
+            temporal_out, _ = self.temporal_attention(batch_x)
+            temporal_outputs.append(temporal_out)
+        temporal_x = torch.cat(temporal_outputs, dim=0)  # [N, T, C]
+        
+        # 确保temporal_x在正确设备上
+        temporal_x = temporal_x.to(device)
+        
+        # 3. 内部门控融合机制
+        dynamic_proj = self.dynamic_proj(x)  # [N, T, C]
+        static_proj = self.static_proj(temporal_x)  # [N, T, C]
+        gate = torch.sigmoid(dynamic_proj + static_proj)  # [N, T, C]
+        fused_features = gate * dynamic_proj + (1 - gate) * static_proj  # [N, T, C]
+        
+        # 4. 重构投影
+        reconstruction = self.reconstruction_projection(fused_features)  # [N, T, in_channels]
+        
+        return fused_features, prior, reconstruction
 
 def process_normal_data(batch_size=20):
     print("=== 开始处理正常数据 ===\n")
@@ -181,7 +236,8 @@ def process_normal_data(batch_size=20):
                 dim_v=32,
                 n_heads=8,
                 dim_fc=64,
-                device='cpu'
+                device='cpu',
+                input_dim=2  # 原始特征维度是2
             )  # [1, 2016, 256]
             all_processed_X.append(processed_X.detach().cpu().numpy())
             #print(f"已处理节点 {i}")
