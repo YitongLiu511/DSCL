@@ -13,121 +13,132 @@ from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import Dataset, DataLoader
 from new_version.temporal_attention import process_temporal_masked_data
 
-def inject_anomalies(data, anomaly_ratio=0.1, random_seed=42):
+def inject_anomalies(data, anomaly_ratio=0.05, random_seed=42):
     """
-    注入异常：通过替换连续3个时间戳的片段
+    优化版：异常片段均匀分配到每个区域，异常标签数量=0.05*区域数*时间槽数，不乘以特征数。
     Args:
         data: 形状为 (n_slots, n_zones, n_features) 的三维数据
-        anomaly_ratio: 异常比例，默认0.1
+        anomaly_ratio: 异常比例，默认0.05
         random_seed: 随机种子
     Returns:
         data_with_anomalies: 注入异常后的数据
-        anomaly_labels: 异常标签，1表示异常，0表示正常
+        anomaly_labels: 异常标签，形状为 (n_slots, n_zones)，1表示异常，0表示正常
     """
     np.random.seed(random_seed)
     total_slots, n_zones, n_features = data.shape
-    
     data_with_anomalies = data.copy()
-    anomaly_labels = np.zeros_like(data)
-    
-    # 计算总数据点数
+    # 修改：标签形状为 (n_slots, n_zones)，不考虑特征维度
+    anomaly_labels = np.zeros((total_slots, n_zones), dtype=int)
+
+    # 计算总数据点数（不乘以特征数）
     total_points = total_slots * n_zones
     # 计算目标异常数据点数
     target_anomaly_points = int(total_points * anomaly_ratio)
-    # 计算异常片段数（每个片段3个点）
+    # 计算每个区域分配的异常片段数（每片段3个点）
     n_anomaly_fragments = target_anomaly_points // 3
-    
-    print(f"\n=== 异常注入统计 ===")
+    fragments_per_zone = n_anomaly_fragments // n_zones
+    extra_fragments = n_anomaly_fragments % n_zones
+
+    print(f"\n=== 优化异常注入统计 ===")
     print(f"区域数量: {n_zones}")
     print(f"总时间槽数: {total_slots}")
     print(f"特征数量: {n_features}")
-    print(f"总数据点数: {total_points}")
+    print(f"总数据点数(不含特征): {total_points}")
     print(f"目标异常数据点数: {target_anomaly_points}")
     print(f"目标异常片段数: {n_anomaly_fragments}")
+    print(f"每个区域分配的异常片段数: {fragments_per_zone}，有{extra_fragments}个区域多分1个")
     print(f"预期异常比例: {anomaly_ratio}")
-    
-    def random_sample_fragments(k, exclude_zone):
-        """随机采样k个候选片段，并确保不在指定区域
-        Args:
-            k: 采样数量
-            exclude_zone: 需要排除的区域
-        Returns:
-            fragments: 候选片段列表，每个元素为(slot, zone)
-        """
-        fragments = []
-        for _ in range(k):
-            zone = np.random.randint(0, n_zones)
-            # 如果随机选到了要排除的区域，就重新选
-            while zone == exclude_zone:
-                zone = np.random.randint(0, n_zones)
-            slot = np.random.randint(0, total_slots - 2)  # 确保有3个连续时间戳
-            fragments.append((slot, zone))
-        return fragments
-    
-    # 计算k值
-    k = 200  # 使用一个固定的、合理的k值
-    print(f"每个目标片段的候选片段数 (固定值): {k}")
-    
+
+    k = 200  # 候选片段数
     injected_fragments = 0
-    while injected_fragments < n_anomaly_fragments:
-        target_zone = np.random.randint(0, n_zones)
-        target_slot = np.random.randint(0, total_slots - 2)
+    zone_injected_count = np.zeros(n_zones, dtype=int)
+    max_retry = 1000
 
-        # 检查该位置是否已经是异常
-        if np.any(anomaly_labels[target_slot:target_slot+3, target_zone] == 1):
-            continue
-
-        target_fragment = data[target_slot:target_slot+3, target_zone]
-        
-        # 候选片段不能来自目标区域
-        candidate_fragments = random_sample_fragments(k, target_zone)
-        
-        candidate_distances = []
-        for candidate_slot, candidate_zone in candidate_fragments:
-            # 避免候选片段与目标片段重叠（虽然跨区域，保险起见）
-            if candidate_zone == target_zone and abs(candidate_slot - target_slot) < 3:
+    for zone in range(n_zones):
+        n_frag = fragments_per_zone + (1 if zone < extra_fragments else 0)
+        retry = 0
+        while zone_injected_count[zone] < n_frag and retry < max_retry:
+            target_slot = np.random.randint(0, total_slots - 2)
+            if np.any(anomaly_labels[target_slot:target_slot+3, zone] == 1):
+                retry += 1
                 continue
-            candidate_fragment = data[candidate_slot:candidate_slot+3, candidate_zone]
-            distance = np.linalg.norm(target_fragment - candidate_fragment)
-            candidate_distances.append((distance, candidate_slot, candidate_zone))
-            
-        if not candidate_distances:
-            continue
-            
-        best_candidate = max(candidate_distances, key=lambda x: x[0])
-        _, best_slot, best_zone = best_candidate
-        
-        # 替换数据并打上标签
-        data_with_anomalies[target_slot:target_slot+3, target_zone] = \
-            data[best_slot:best_slot+3, best_zone]
-        anomaly_labels[target_slot:target_slot+3, target_zone] = 1
-        
-        # 在注入片段的边缘进行平滑处理，以减小突变
-        if target_slot > 0:
-            # 平滑开始点 (80%原数据 + 20%异常数据)
-            data_with_anomalies[target_slot, target_zone] = \
-                0.8 * data[target_slot, target_zone] + \
-                0.2 * data_with_anomalies[target_slot, target_zone]
-        
-        if target_slot < total_slots - 3:
-            # 平滑结束点 (80%原数据 + 20%异常数据)
-            data_with_anomalies[target_slot + 2, target_zone] = \
-                0.8 * data[target_slot + 2, target_zone] + \
-                0.2 * data_with_anomalies[target_slot + 2, target_zone]
+            target_fragment = data[target_slot:target_slot+3, zone, :]
+            candidate_zones = [z for z in range(n_zones) if z != zone]
+            candidate_fragments = []
+            for _ in range(k):
+                candidate_zone = np.random.choice(candidate_zones)
+                candidate_slot = np.random.randint(0, total_slots - 2)
+                if candidate_zone == zone and abs(candidate_slot - target_slot) < 3:
+                    continue
+                candidate_fragment = data[candidate_slot:candidate_slot+3, candidate_zone, :]
+                distance = np.linalg.norm(target_fragment - candidate_fragment)
+                candidate_fragments.append((distance, candidate_slot, candidate_zone))
+            if not candidate_fragments:
+                retry += 1
+                continue
+            best_candidate = max(candidate_fragments, key=lambda x: x[0])
+            _, best_slot, best_zone = best_candidate
+            # 替换数据并打上标签（只标记区域-时间组合，不考虑特征维度）
+            data_with_anomalies[target_slot:target_slot+3, zone, :] = data[best_slot:best_slot+3, best_zone, :]
+            anomaly_labels[target_slot:target_slot+3, zone] = 1
+            zone_injected_count[zone] += 1
+            injected_fragments += 1
+            if injected_fragments % 100 == 0:
+                print(f"已注入异常片段数: {injected_fragments}/{n_anomaly_fragments}")
+            retry = 0
+        if retry >= max_retry:
+            print(f"区域{zone}注入异常片段失败次数过多，已跳过。实际注入: {zone_injected_count[zone]}")
 
-        injected_fragments += 1
-        if injected_fragments % 100 == 0:
-            print(f"已注入异常片段数: {injected_fragments}/{n_anomaly_fragments}")
-    
-    # 统计异常点数
-    actual_anomaly_points = np.sum(np.any(anomaly_labels == 1, axis=-1))
+    # 统计异常点数（不乘以特征数）
+    actual_anomaly_points = np.sum(anomaly_labels == 1)
     actual_ratio = actual_anomaly_points / total_points
-    print(f"\n=== 异常注入完成 ===")
+    print(f"\n=== 优化异常注入完成 ===")
     print(f"实际注入的异常片段数: {injected_fragments}")
-    print(f"实际异常数据点数: {actual_anomaly_points}")
+    print(f"实际异常点数(不含特征): {actual_anomaly_points}")
     print(f"实际异常比例: {actual_ratio:.4f}")
+    print(f"每个区域实际注入片段数: {zone_injected_count}")
 
     return data_with_anomalies, anomaly_labels
+
+# ========== 智能时空均值填补函数 ==========
+def smart_fill_nan(values):
+    filled = values.copy()
+    T, Z = filled.shape
+    for t in range(T):
+        for z in range(Z):
+            if np.isnan(filled[t, z]):
+                # 1. 相邻时间均值
+                time_neighbors = []
+                for dt in [-2, -1, 1, 2]:
+                    nt = t + dt
+                    if 0 <= nt < T and not np.isnan(filled[nt, z]):
+                        time_neighbors.append(filled[nt, z])
+                if time_neighbors:
+                    filled[t, z] = np.mean(time_neighbors)
+                    continue
+                # 2. 相邻空间均值
+                space_neighbors = []
+                for dz in [-2, -1, 1, 2]:
+                    nz = z + dz
+                    if 0 <= nz < Z and not np.isnan(filled[t, nz]):
+                        space_neighbors.append(filled[t, nz])
+                if space_neighbors:
+                    filled[t, z] = np.mean(space_neighbors)
+                    continue
+                # 3. 本区域历史均值
+                region_mean = np.nanmean(filled[:, z])
+                if not np.isnan(region_mean):
+                    filled[t, z] = region_mean
+                    continue
+                # 4. 全局均值
+                global_mean = np.nanmean(filled)
+                if not np.isnan(global_mean):
+                    filled[t, z] = global_mean
+                    continue
+                # 5. 最后用0
+                filled[t, z] = 0
+    return filled
+# ========== END ==========
 
 def load_dataset(args, run_post_processing=True):
     """
@@ -142,91 +153,78 @@ def load_dataset(args, run_post_processing=True):
     Returns:
         根据 run_post_processing 的值，返回不同数量的结果
     """
-    # 首先加载邻接矩阵以获取基准区域集合
+    # 读取taxi zones数据，先得到曼哈顿区域ID
+    zone_lookup = pd.read_csv("data/taxi _zone_lookup.csv")
+    manhattan_ids = zone_lookup[zone_lookup['Borough'] == 'Manhattan']['LocationID'].tolist()
+    print(f"曼哈顿区域ID数量: {len(manhattan_ids)}，ID列表: {manhattan_ids}")
+    valid_zones = manhattan_ids  # 后续所有valid_zones都用曼哈顿ID
+
+    # 加载邻接矩阵，并裁剪为曼哈顿子矩阵
     adj_data = np.load("data/static_adjacency.npz")
-    adj = adj_data['connectivity']  # 连通性矩阵
-    dist = adj_data['distance']     # 距离矩阵
-    poi_sim = adj_data['poi_similarity']  # POI相似度矩阵
-    n_zones = adj.shape[0]  # 应该是263
-    print(f"邻接矩阵中的区域数量: {n_zones}")
-    
-    # 读取出租车数据（1月和2月）
+    adj = adj_data['connectivity']
+    dist = adj_data['distance']
+    poi_sim = adj_data['poi_similarity']
+    manhattan_indices = [i-1 for i in manhattan_ids]
+    adj = adj[np.ix_(manhattan_indices, manhattan_indices)]
+    dist = dist[np.ix_(manhattan_indices, manhattan_indices)]
+    poi_sim = poi_sim[np.ix_(manhattan_indices, manhattan_indices)]
+    print(f"曼哈顿子矩阵形状: adj={adj.shape}, dist={dist.shape}, poi_sim={poi_sim.shape}")
+
+    # 读取出租车数据
     df_jan = pd.read_parquet("data/yellow_tripdata_2023-01.parquet")
     df_feb = pd.read_parquet("data/yellow_tripdata_2023-02.parquet")
     df = pd.concat([df_jan, df_feb], ignore_index=True)
     print("原始数据形状:", df.shape)
-    
-    # 读取taxi zones数据
-    zone_lookup = pd.read_csv("data/taxi _zone_lookup.csv")
-    print("区域查找表中的区域数量:", len(zone_lookup))
-    
-    # 获取邻接矩阵中使用的区域ID
-    valid_zones = np.arange(1, n_zones + 1)  # 假设区域ID是从1开始连续的
-    print("有效区域ID范围:", valid_zones[0], "到", valid_zones[-1])
-    
-    # 转换时间戳
+
+    # 先转为datetime
     df['pickup_datetime'] = pd.to_datetime(df['tpep_pickup_datetime'])
-    
-    # 只保留2023年1月和2月的数据
+    # 只保留2023年1月和2月
     df = df[(df['pickup_datetime'].dt.year == 2023) & (df['pickup_datetime'].dt.month.isin([1, 2]))]
-    
-    # 按10分钟聚合数据，并确保时间槽对齐
+    # 只保留曼哈顿区域的出发和到达
+    df = df[df['PULocationID'].isin(valid_zones) & df['DOLocationID'].isin(valid_zones)]
+    print("只保留曼哈顿后数据形状:", df.shape)
+    # 只保留每天7:00-23:50的数据
+    df['slot_time'] = df['pickup_datetime'].dt.time
+    from datetime import time
+    df = df[(df['slot_time'] >= time(7,0)) & (df['slot_time'] <= time(23,50))]
+    print("只保留7:00-23:50后数据形状:", df.shape)
+
+    # 时间槽处理
     df['time_slot'] = df['pickup_datetime'].dt.floor('10min')
     df['day'] = df['pickup_datetime'].dt.date
-    
-    # 确保LocationID在有效范围内
-    df = df[df['PULocationID'].isin(valid_zones) & df['DOLocationID'].isin(valid_zones)]
-    print("过滤后数据形状:", df.shape)
-    
-    # 创建完整的时间槽索引
-    time_slots_per_day = 24 * 6  # 10分钟一个时间槽，每天144个时间槽
+
+    time_slots_per_day = 17 * 6  # 7:00~23:50 共17小时
     all_days = sorted(df['day'].unique())
-    
-    # 分别计算流入和流出流量
-    inflow_data = df.groupby(['day', 'time_slot', 'DOLocationID']).size().unstack(fill_value=0.0)  # 流入流量
-    outflow_data = df.groupby(['day', 'time_slot', 'PULocationID']).size().unstack(fill_value=0.0)  # 流出流量
-    print("初始聚合后数据形状 - 流入:", inflow_data.shape, "流出:", outflow_data.shape)
-    
-    # 打印列名信息
-    print("\n流入数据列名:", sorted(inflow_data.columns))
-    print("流出数据列名:", sorted(outflow_data.columns))
-    
-    # 确保所有区域都存在，并且只包含有效区域
+
+    # 统计流入/流出
+    inflow_data = df.groupby(['day', 'time_slot', 'DOLocationID']).size().unstack(fill_value=np.nan)
+    outflow_data = df.groupby(['day', 'time_slot', 'PULocationID']).size().unstack(fill_value=np.nan)
+
+    # 确保所有曼哈顿区域都存在
     for zone in valid_zones:
         if zone not in inflow_data.columns:
-            inflow_data[zone] = 0.0
+            inflow_data[zone] = np.nan
         if zone not in outflow_data.columns:
-            outflow_data[zone] = 0.0
-    
-    # 只保留有效区域并排序
+            outflow_data[zone] = np.nan
     inflow_data = inflow_data[sorted(valid_zones)]
     outflow_data = outflow_data[sorted(valid_zones)]
-    
-    print("\n处理后的列名:")
-    print("流入数据列名:", sorted(inflow_data.columns))
-    print("流出数据列名:", sorted(outflow_data.columns))
-    
-    # 重置索引，确保数据按天和时间槽排序
+
+    # 补全时间槽
     inflow_data = inflow_data.reset_index()
     outflow_data = outflow_data.reset_index()
-    
     inflow_data['day'] = pd.to_datetime(inflow_data['day']).dt.date
     outflow_data['day'] = pd.to_datetime(outflow_data['day']).dt.date
-    
     inflow_data = inflow_data.sort_values(['day', 'time_slot'])
     outflow_data = outflow_data.sort_values(['day', 'time_slot'])
-    
-    # 确保每天都有完整的时间槽
+
     complete_inflow_data = []
     complete_outflow_data = []
-    
     for day in all_days:
-        # 处理流入数据
         day_inflow = inflow_data[inflow_data['day'] == day].copy()
         if len(day_inflow) < time_slots_per_day:
             time_slots = pd.date_range(
-                start=pd.Timestamp(day),
-                end=pd.Timestamp(day) + pd.Timedelta(days=1) - pd.Timedelta(minutes=10),
+                start=pd.Timestamp(day) + pd.Timedelta(hours=7),
+                end=pd.Timestamp(day) + pd.Timedelta(hours=23, minutes=50),
                 freq='10min'
             ).time
             complete_day = pd.DataFrame({
@@ -238,17 +236,15 @@ def load_dataset(args, run_post_processing=True):
                 day_inflow,
                 on=['day', 'time_slot'],
                 how='left'
-            ).fillna(0.0)
+            )
             complete_inflow_data.append(complete_day)
         else:
             complete_inflow_data.append(day_inflow)
-            
-        # 处理流出数据
         day_outflow = outflow_data[outflow_data['day'] == day].copy()
         if len(day_outflow) < time_slots_per_day:
             time_slots = pd.date_range(
-                start=pd.Timestamp(day),
-                end=pd.Timestamp(day) + pd.Timedelta(days=1) - pd.Timedelta(minutes=10),
+                start=pd.Timestamp(day) + pd.Timedelta(hours=7),
+                end=pd.Timestamp(day) + pd.Timedelta(hours=23, minutes=50),
                 freq='10min'
             ).time
             complete_day = pd.DataFrame({
@@ -260,147 +256,78 @@ def load_dataset(args, run_post_processing=True):
                 day_outflow,
                 on=['day', 'time_slot'],
                 how='left'
-            ).fillna(0.0)
+            )
             complete_outflow_data.append(complete_day)
         else:
             complete_outflow_data.append(day_outflow)
-    
     inflow_data = pd.concat(complete_inflow_data, ignore_index=True)
     outflow_data = pd.concat(complete_outflow_data, ignore_index=True)
-    
-    print("处理后数据形状 - 流入:", inflow_data.shape, "流出:", outflow_data.shape)
-    
-    # 转换为numpy数组
-    inflow_values = inflow_data.iloc[:, 2:].values  # 只取数值列
-    outflow_values = outflow_data.iloc[:, 2:].values  # 只取数值列
-    
-    print("转换为numpy数组后形状 - 流入:", inflow_values.shape, "流出:", outflow_values.shape)
-    
-    # -- 注释掉三维变四维的操作 --
-    # n_days = len(all_days)
-    # inflow_values = inflow_values.reshape(n_days, time_slots_per_day, n_zones)
-    # outflow_values = outflow_values.reshape(n_days, time_slots_per_day, n_zones)
-    
-    # 合并流入和流出数据
+
+    # 用历史均值填充缺失值（而不是0）
+    inflow_values = inflow_data.iloc[:, 2:].values.astype(float)
+    outflow_values = outflow_data.iloc[:, 2:].values.astype(float)
+    # 智能时空均值填补
+    inflow_values = smart_fill_nan(inflow_values)
+    outflow_values = smart_fill_nan(outflow_values)
+    # 归一化：对每个区域单独归一化
+    scaler_in = MinMaxScaler()
+    scaler_out = MinMaxScaler()
+    inflow_values = scaler_in.fit_transform(inflow_values)
+    outflow_values = scaler_out.fit_transform(outflow_values)
+    # 归一化后再检查一遍
+    if np.any(np.isnan(inflow_values)):
+        print("归一化后inflow仍有NaN，全部用0填补")
+        inflow_values[np.isnan(inflow_values)] = 0
+    if np.any(np.isnan(outflow_values)):
+        print("归一化后outflow仍有NaN，全部用0填补")
+        outflow_values[np.isnan(outflow_values)] = 0
+
+    # 合并流入和流出
     flow_values = np.stack([inflow_values, outflow_values], axis=-1)
     print(f"合并后数据形状 (三维): {flow_values.shape}")
-    
-    # 1. 划分训练集和测试集
-    # 训练集天数 * 每天时间槽数 = 总时间槽数
+
+    # 划分训练/测试集
     n_train_slots = 14 * time_slots_per_day
     n_test_slots = 14 * time_slots_per_day
-    
     X_train = flow_values[:n_train_slots]
     X_test = flow_values[n_train_slots : n_train_slots + n_test_slots]
-    
-    # 提前初始化标签数组，确保它们总是存在
-    y_train = np.zeros_like(X_train)
-    y_test = np.zeros_like(X_test)
-    
+    # 标签初始化为二维 shape: (时间槽数, 区域数)
+    y_train = np.zeros((X_train.shape[0], X_train.shape[1]), dtype=int)
+    y_test = np.zeros((X_test.shape[0], X_test.shape[1]), dtype=int)
     print(f"\n数据集划分:")
     print(f"训练集形状: {X_train.shape}")
     print(f"测试集形状: {X_test.shape}")
-    
-    # 2. 归一化
-    if False:  # 已禁用归一化操作
-        print("\n开始归一化...")
-        scaler = MinMaxScaler()
-        # 使用训练集拟合归一化参数
-        X_train_reshaped = X_train.reshape(-1, 2)  # 重塑为2D数组，每行包含流入和流出两个特征
-        scaler.fit(X_train_reshaped)
-        # 转换训练集和测试集
-        X_train = scaler.transform(X_train_reshaped).reshape(X_train.shape)
-        X_test = scaler.transform(X_test.reshape(-1, 2)).reshape(X_test.shape)
-        print("归一化完成")
-        
-        # 保存归一化后的数据
-        np.save('data/normalized_train.npy', X_train)
-        np.save('data/normalized_test.npy', X_test)
-        print("已保存归一化后的训练集和测试集")
-    
-    # 3. 在归一化后的训练集中注入异常
+
+    # 剔除0值比例大于0.7的区域（在异常注入之前）
+    zero_ratio_per_zone = (X_train == 0).sum(axis=(0, 2)) / (X_train.shape[0] * X_train.shape[2])
+    active_zones = np.where(zero_ratio_per_zone < 0.7)[0]
+    print('活跃区域索引:', active_zones)
+    print('活跃区域数量:', len(active_zones))
+    # 只对数据做区域裁剪
+    X_train = X_train[:, active_zones, :]
+    X_test = X_test[:, active_zones, :]
+    adj = adj[np.ix_(active_zones, active_zones)]
+    dist = dist[np.ix_(active_zones, active_zones)]
+    poi_sim = poi_sim[np.ix_(active_zones, active_zones)]
+    print(f'最终活跃区域邻接矩阵形状: adj={adj.shape}, dist={dist.shape}, poi_sim={poi_sim.shape}')
+
+    # 用裁剪后的shape初始化标签（二维）
+    y_train = np.zeros((X_train.shape[0], X_train.shape[1]), dtype=int)
+    y_test = np.zeros((X_test.shape[0], X_test.shape[1]), dtype=int)
+
+    # 保存清洗好但未注入异常的训练数据
+    np.save('data/datanew1/normalized_train_clean.npy', X_train)
+    print('已保存清洗但未注入异常的训练数据到: data/datanew1/normalized_train_clean.npy')
+
+    # 异常注入（对训练集和测试集都注入异常）
     if args.inject_anomaly:
-        print("\n开始注入异常...")
+        print("\n开始注入异常到训练集...")
         X_train, y_train = inject_anomalies(X_train, anomaly_ratio=args.anomaly_ratio)
-        
-    # 如果不需要后处理，则直接返回
-    if not run_post_processing:
-        return X_train, X_test, (adj, dist, poi_sim), y_train, y_test
+        print("\n开始注入异常到测试集...")
+        X_test, y_test = inject_anomalies(X_test, anomaly_ratio=args.anomaly_ratio)
 
-    # --- 后续处理（时频掩码、注意力等） ---
-    print("\n=== 开始时频掩蔽处理 ===")
-    
-    # 创建时频掩蔽模块
-    masking_module = TemporalFrequencyMasking(
-        window_size=10,  # 可以根据需要调整窗口大小
-        temporal_mask_ratio=0.1,
-        frequency_mask_ratio=0.1,
-        d_model=263  # 使用区域数量作为模型维度
-    )
-    
-    # 将数据转换为PyTorch张量
-    X_train_tensor = torch.FloatTensor(X_train)
-    X_test_tensor = torch.FloatTensor(X_test)
-    
-    print("处理训练集...")
-    temporal_masked_X_train, temporal_mask_indices_train = masking_module.temporal_masking(X_train_tensor)
-    frequency_masked_X_train, frequency_mask_indices_train = masking_module.frequency_masking(X_train_tensor)
-    print(f"训练集时间掩蔽位置数量: {temporal_mask_indices_train.shape[0] * temporal_mask_indices_train.shape[1]}")
-    print(f"训练集频率掩蔽位置数量: {frequency_mask_indices_train.shape[0] * frequency_mask_indices_train.shape[1]}")
-    
-    print("\n处理测试集...")
-    temporal_masked_X_test, temporal_mask_indices_test = masking_module.temporal_masking(X_test_tensor)
-    frequency_masked_X_test, frequency_mask_indices_test = masking_module.frequency_masking(X_test_tensor)
-    print(f"测试集时间掩蔽位置数量: {temporal_mask_indices_test.shape[0] * temporal_mask_indices_test.shape[1]}")
-    print(f"测试集频率掩蔽位置数量: {frequency_mask_indices_test.shape[0] * frequency_mask_indices_test.shape[1]}")
-    
-    # 将掩蔽后的数据转换为numpy数组
-    X_train = temporal_masked_X_train.cpu().detach().numpy()
-    X_test = temporal_masked_X_test.cpu().detach().numpy()
-    
-    # 添加时间注意力处理
-    print("\n=== 开始时间注意力处理 ===")
-    
-    print("处理训练集时间掩码数据...")
-    # 将numpy数组转回PyTorch张量
-    temporal_masked_X_train_tensor = torch.FloatTensor(X_train)
-    # 应用时间注意力处理
-    processed_X_train, train_attention_weights = process_temporal_masked_data(
-        temporal_masked_X_train_tensor,
-        d_model=263,  # 使用区域数量作为模型维度
-        n_heads=8,
-        device='cuda' if torch.cuda.is_available() else 'cpu'
-    )
-    print(f"训练集时间注意力处理完成，输出形状: {processed_X_train.shape}")
-    print(f"注意力权重数量: {len(train_attention_weights)}")
-    
-    print("\n处理测试集时间掩码数据...")
-    temporal_masked_X_test_tensor = torch.FloatTensor(X_test)
-    processed_X_test, test_attention_weights = process_temporal_masked_data(
-        temporal_masked_X_test_tensor,
-        d_model=263,
-        n_heads=8,
-        device='cuda' if torch.cuda.is_available() else 'cpu'
-    )
-    print(f"测试集时间注意力处理完成，输出形状: {processed_X_test.shape}")
-    print(f"注意力权重数量: {len(test_attention_weights)}")
-    
-    # 将处理后的数据转换回numpy数组
-    X_train = processed_X_train.cpu().detach().numpy()
-    X_test = processed_X_test.cpu().detach().numpy()
-    y_train = None  # Assuming y_train is not provided in the original function
-    y_test = None  # Assuming y_test is not provided in the original function
-
-    print("\n=== 时频掩蔽处理完成 ===")
-    print(f"处理后的训练集形状: {X_train.shape}")
-    print(f"处理后的测试集形状: {X_test.shape}")
-    
-    # 保存最终处理后的数据
-    np.save('data/processed_train.npy', X_train)
-    np.save('data/processed_test.npy', X_test)
-    print("已保存最终处理后的训练集和测试集")
-
-    return X_train, X_test, (adj, dist, poi_sim), y_train, y_test
+    # 返回数据，并返回active_zones索引
+    return X_train, X_test, (adj, dist, poi_sim), y_train, y_test, active_zones
 
 def get_loader_segment(data, patch_len, stride, batch_size, shuffle=True):
     """
@@ -456,11 +383,11 @@ if __name__ == "__main__":
     parser.add_argument('--normalize', action='store_true', help='是否归一化数据')
     parser.add_argument('--n_day', type=int, default=14, help='训练集天数')
     parser.add_argument('--inject_anomaly', action='store_true', help='是否注入异常')
-    parser.add_argument('--anomaly_ratio', type=float, default=0.1, help='异常比例')
+    parser.add_argument('--anomaly_ratio', type=float, default=0.05, help='异常比例')
     args = parser.parse_args()
     
     # 加载数据集
-    X_train, X_test, (adj, dist, poi_sim), y_train, y_test = load_dataset(args)
+    X_train, X_test, (adj, dist, poi_sim), y_train, y_test, active_zones = load_dataset(args)
     
     print("\n最终数据形状:")
     print(f"X_train shape: {X_train.shape}")
@@ -469,6 +396,30 @@ if __name__ == "__main__":
     print(f"dist shape: {dist.shape}")
     print(f"poi_sim shape: {poi_sim.shape}")
     if y_train is not None:
-        print(f"y_train shape: {y_train.shape}")
+        print(f"y_train shape: {y_train.shape}")  # 应该是 (时间槽数, 区域数)
     if y_test is not None:
-        print(f"y_test shape: {y_test.shape}") 
+        print(f"y_test shape: {y_test.shape}")  # 应该是 (时间槽数, 区域数)
+
+    save_dir = 'data/datanew1'
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, 'normalized_train_injected.npy')
+    np.save(save_path, X_train)
+    print(f'已保存归一化且注入异常后的训练集到: {save_path}')
+    # 保存标签
+    if y_train is not None:
+        label_path = os.path.join(save_dir, 'anomaly_labels_train_injected.npy')
+        np.save(label_path, y_train)
+        print(f'已保存对应标签到: {label_path}') 
+    # 保存active_zones索引
+    az_path = os.path.join(save_dir, 'active_zones.npy')
+    np.save(az_path, active_zones)
+    print(f'已保存活跃区域索引到: {az_path}') 
+
+    # ====== 新增：保存测试集和测试集标签 ======
+    test_save_path = os.path.join(save_dir, 'normalized_test_injected.npy')
+    np.save(test_save_path, X_test)
+    print(f'已保存归一化后的测试集到: {test_save_path}')
+    if y_test is not None:
+        test_label_path = os.path.join(save_dir, 'anomaly_labels_test_injected.npy')
+        np.save(test_label_path, y_test)
+        print(f'已保存测试集标签到: {test_label_path}') 

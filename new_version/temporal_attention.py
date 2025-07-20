@@ -191,8 +191,7 @@ class TemporalAttentionProcessor(nn.Module):
         # 多层时间注意力块
         self.attention_layers = nn.ModuleList([
             TemporalAttentionLayer(d_model, dim_k, dim_v, n_heads, dim_fc, device)
-            for _ in range(3)  # 3层注意力
-        ])
+        ])  # 只保留一层注意力
         
         # 输出投影层
         self.output_projection = nn.Sequential(

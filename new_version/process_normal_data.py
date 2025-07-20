@@ -86,109 +86,69 @@ class SingleGCN(torch.nn.Module):
         return x, prior
 
 class MultipleGCN(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, matrices, n_layers=1, activation=F.relu, bias=False):
+    def __init__(self, in_channels, out_channels, matrices, n_layers=2, activation=F.relu, bias=False):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.matrices = matrices
+        self.matrices = matrices  # [K, N, N]
         self.n_layers = n_layers
         self.activation = activation
         self.n_graph = matrices.shape[0]
 
         d = self.matrices.shape[-1]
-        self.sigma = torch.nn.Linear(self.n_graph, d)
-        self.alpha = torch.nn.parameter.Parameter(torch.ones(self.n_graph) / self.n_graph)
-        # 修复线性层维度，应该是in_channels而不是1
-        self.linears = nn.ModuleList(
-            [nn.Linear(in_channels, out_channels, bias=bias)] +
-            [nn.Linear(out_channels, out_channels, bias=bias) for _ in range(n_layers-1)]
-        )
-        self.mat_2 = matrices.square()
+        # 每个视图两层GCN权重
+        self.linears1 = nn.ModuleList([nn.Linear(in_channels, out_channels, bias=bias) for _ in range(self.n_graph)])
+        self.linears2 = nn.ModuleList([nn.Linear(out_channels, out_channels, bias=bias) for _ in range(self.n_graph)])
+        self.sigma = nn.Parameter(torch.ones(self.n_graph, d))
+        self.alpha = nn.Parameter(torch.ones(self.n_graph) / self.n_graph)
+        
+        # 添加重构投影层，将输出投影到2维（与原始特征维度匹配）
+        self.reconstruction_proj = nn.Linear(out_channels, 2)
+
         self.mask = self.generate_mask()
-        
-        # 新增：内部时间注意力机制
-        self.temporal_attention = TemporalAttentionProcessor(
-            d_model=out_channels,
-            dim_k=32,
-            dim_v=32,
-            n_heads=4,
-            dim_fc=64,
-            device='cpu',
-            input_dim=out_channels  # 使用out_channels作为输入维度
-        )
-        
-        # 新增：内部门控融合机制（用于重构损失）
-        # 按照DSCL-master (1)的实现方式
-        self.dynamic_proj = nn.Linear(out_channels, out_channels)
-        self.static_proj = nn.Linear(out_channels, out_channels)
-        self.reconstruction_projection = nn.Linear(out_channels, in_channels)  # 投影回原始维度
 
     def generate_mask(self):
-        # 距离为0的位置设为1，对角线设为0，与DSCL-master保持一致
         matrix = (self.matrices.cpu().detach().numpy() == 0.).astype(int)
-        # 对角线设为0
         matrix[:, range(matrix.shape[1]), range(matrix.shape[1])] = 0
         return torch.Tensor(matrix) == 1
 
-    @property
-    def STS(self):
-        sigma = self.sigma.weight.reshape(self.n_graph, 1, -1)
-        sigma = torch.sigmoid(sigma * 5) + 1e-5
-        sigma = torch.pow(3, sigma) - 1
-        exp = torch.exp(-self.matrices / (2 * sigma**2))
-        prior = exp / (math.sqrt(2 * math.pi) * sigma)
-        prior = prior.masked_fill(self.mask.to(exp.device), 0)
-        prior /= prior.sum(1, keepdims=True) + 1e-8
-        prior = prior.permute(1, 2, 0) @ torch.softmax(self.alpha, 0)
-        return prior
-
     def forward(self, x):
-        # 只支持 [N, T, C] 输入
-        assert len(x.shape) == 3, 'MultipleGCN 只支持 [N, T, C] 输入'
+        # x: [N, T, C]，应为时间自注意力层输出的补丁嵌入
         N, T, C = x.shape
         device = x.device
+        outputs = []
+        all_prior = []
+        for k in range(self.n_graph):
+            # 1. 计算prior
+            sigma_k = torch.sigmoid(self.sigma[k] * 5) + 1e-5
+            sigma_k = torch.pow(3, sigma_k) - 1
+            mat2 = self.matrices[k].square()
+            exp = torch.exp(-mat2 / (2 * sigma_k**2))
+            prior = exp / (math.sqrt(2 * math.pi) * sigma_k)
+            prior = prior.masked_fill(self.mask[k].to(device), 0)
+            prior /= prior.sum(1, keepdim=True) + 1e-8  # 行归一化
+            all_prior.append(prior.unsqueeze(0))  # [1, N, N]
+
+            # 2. 两层GCN
+            wx1 = prior @ x  # [N, T, C]
+            out1 = self.activation(self.linears1[k](wx1))
+            wx2 = prior @ out1
+            out2 = self.activation(self.linears2[k](wx2))  # [N, T, out_channels]
+            outputs.append(out2.unsqueeze(0))  # [1, N, T, out_channels]
+
+        outputs = torch.cat(outputs, dim=0)  # [K, N, T, out_channels]
+        all_prior = torch.cat(all_prior, dim=0)  # [K, N, N]
+        alpha_softmax = torch.softmax(self.alpha, dim=0).view(self.n_graph, 1, 1, 1)
+        fused = (outputs * alpha_softmax).sum(dim=0)  # [N, T, out_channels]
+        alpha_softmax_prior = torch.softmax(self.alpha, dim=0).view(self.n_graph, 1, 1)
+        A_S = (all_prior * alpha_softmax_prior).sum(dim=0)  # [N, N]
         
-        # 确保所有模块都在正确设备上
-        self.temporal_attention = self.temporal_attention.to(device)
-        self.dynamic_proj = self.dynamic_proj.to(device)
-        self.static_proj = self.static_proj.to(device)
-        self.reconstruction_projection = self.reconstruction_projection.to(device)
-        
-        # 确保所有线性层都在正确设备上
-        for i in range(self.n_layers):
-            self.linears[i] = self.linears[i].to(device)
-        
-        prior = self.STS.to(device)  # [N, N]
-        
-        # 1. 图卷积处理
-        for i in range(self.n_layers):
-            wx = prior @ x  # [N, T, C]
-            x = self.activation(self.linears[i](wx))
-        
-        # 2. 内部时间注意力机制
-        # x: [N, T, C]
-        batch_size = 10
-        temporal_outputs = []
-        for start in range(0, N, batch_size):
-            end = min(start + batch_size, N)
-            batch_x = x[start:end]  # [batch_size, T, C]
-            temporal_out, _ = self.temporal_attention(batch_x)
-            temporal_outputs.append(temporal_out)
-        temporal_x = torch.cat(temporal_outputs, dim=0)  # [N, T, C]
-        
-        # 确保temporal_x在正确设备上
-        temporal_x = temporal_x.to(device)
-        
-        # 3. 内部门控融合机制
-        dynamic_proj = self.dynamic_proj(x)  # [N, T, C]
-        static_proj = self.static_proj(temporal_x)  # [N, T, C]
-        gate = torch.sigmoid(dynamic_proj + static_proj)  # [N, T, C]
-        fused_features = gate * dynamic_proj + (1 - gate) * static_proj  # [N, T, C]
-        
-        # 4. 重构投影
-        reconstruction = self.reconstruction_projection(fused_features)  # [N, T, in_channels]
-        
-        return fused_features, prior, reconstruction
+        # 为了兼容main_workflow.py的期望，返回三个值
+        # static_out: 融合后的特征
+        # static_scores: 静态依赖矩阵
+        # static_reconstruction: 重构输出（投影到2维）
+        static_reconstruction = self.reconstruction_proj(fused)  # [N, T, 2]
+        return fused, A_S, static_reconstruction  # 处理后的特征, 静态依赖加权融合矩阵, 重构输出
 
 def process_normal_data(batch_size=20):
     print("=== 开始处理正常数据 ===\n")
