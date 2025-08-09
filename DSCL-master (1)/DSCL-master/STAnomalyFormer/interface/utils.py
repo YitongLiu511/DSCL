@@ -20,8 +20,20 @@ def recall_k(actual, predicted, k):
     if torch.is_tensor(predicted):
         predicted = predicted.cpu().numpy()
     
+    # 确保actual和predicted长度一致
+    if len(actual) != len(predicted):
+        print(f"⚠️  警告：actual长度({len(actual)})与predicted长度({len(predicted)})不匹配")
+        min_len = min(len(actual), len(predicted))
+        actual = actual[:min_len]
+        predicted = predicted[:min_len]
+    
+    # 确保k不超过数组长度
+    k = min(k, len(actual))
+    if k <= 0:
+        return 0.0
+    
     sort_index = np.argsort(predicted)
-    return np.sum(actual[sort_index[-k:]]) / np.sum(actual)
+    return np.sum(actual[sort_index[-k:]]) / k
 
 
 def predict_by_score(

@@ -1506,14 +1506,15 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
     ):
         super().__init__(seq_len, patch_len, stride, d_in, d_model, n_heads,
                          temporal_half, spatial_half, n_gcn, device, epoch, lr,
-                         contamination, verbose)
+                         early_stopping, use_recon, use_const, diff_const, static_only,
+                         dynamic_only, contamination, verbose)
         self.args = args  # 保存args参数
         self.cluster_weight = cluster_weight  # 保存聚类损失权重
         
-        # 修改损失权重初始化：现在用于一致性损失和聚类损失的动态权重
-        # loss_weight[0]: 一致性损失权重
-        # loss_weight[1]: 聚类损失权重
-        self.loss_weight = torch.ones(2, device=self.device) / 2
+        # 修改损失权重初始化：使用固定权重
+        # loss_weight[0]: 一致性损失权重（固定为0.5）
+        # loss_weight[1]: 聚类损失权重（固定为0.5）
+        self.loss_weight = torch.tensor([0.5, 0.5], device=self.device)  # 一致性损失权重0.5，聚类损失权重0.5
 
     def fit(self, x, mats, evaluate=None, x_clean=None):
         print("开始fit方法...")
@@ -1544,7 +1545,7 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
         process = range(self.epoch) if not self.verbose else tqdm(
             range(self.epoch))
         print(f"开始训练，总轮数: {self.epoch}")
-        print(f"初始动态权重: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}]")
+        print(f"初始固定权重: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}]")
         print("🆕 新功能：已启用滑动窗口时间戳预测")
         print("📝 训练时将使用滑动窗口损失，预测完成后将使用滑动窗口预测所有时间戳的异常情况")
         print("🔧 滑动窗口：用前12个时间戳预测第12个，用1-12预测第12个，用2-13预测第13个，以此类推")
@@ -1564,45 +1565,42 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
             N, T, D = x_.shape
             
             # 创建滑动窗口训练数据
-            num_windows = T - seq_len + 1
+            num_windows = T - seq_len
             
             # 只在第一个epoch打印窗口信息
             if epoch == 0:
                 print(f"🔄 滑动窗口训练：共 {num_windows} 个窗口，每个窗口长度 {seq_len}")
             
-            # 随机选择三分之一的滑动窗口进行训练（避免内存问题）
-            max_windows_per_epoch = max(1, num_windows // 3)  # 处理三分之一
-            window_indices = torch.randperm(num_windows)[:max_windows_per_epoch]
-            
-            # 只在第一个epoch打印选择信息
+            # 使用异常恢复预测范式
             if epoch == 0:
-                print(f"🎯 随机选择 {max_windows_per_epoch} 个窗口进行训练 (总共 {num_windows} 个)")
+                print(f"🎯 使用异常恢复预测范式训练，总共 {num_windows} 个窗口")
+                print(f"📊 训练策略：异常数据 → 预测正常值 → 与clean真实值比较")
             
-            selected_windows = []
-            selected_targets = []
+            # 创建动态Dataset - 异常恢复预测范式
+            if x_clean is not None:
+                # 使用异常数据作为输入，clean数据作为目标
+                train_dataset = AnomalyRecoveryDataset(x_, x_clean_, seq_len)
+            else:
+                train_dataset = SlidingWindowDataset(x_, seq_len)
             
-            for idx in window_indices:
-                t = seq_len - 1 + idx
-                window = x_[:, t-seq_len+1:t+1, :]  # (N, seq_len, D)
-                selected_windows.append(window)
-                
-                if x_clean is not None:
-                    target = x_clean_[:, t:t+1, :]
-                else:
-                    target = x_[:, t:t+1, :]
-                selected_targets.append(target)
+            # 使用DataLoader进行批次训练
+            batch_size = 32  # 可以根据显存调整
+            train_loader = torch.utils.data.DataLoader(
+                train_dataset, 
+                batch_size=batch_size, 
+                shuffle=True,  # 随机打乱
+                num_workers=0,  # 避免多进程问题
+                pin_memory=False  # 数据已在GPU上，不需要pin_memory
+            )
             
-            training_windows = torch.stack(selected_windows, dim=0)  # (max_windows_per_epoch, N, seq_len, D)
-            training_targets = torch.stack(selected_targets, dim=0)  # (max_windows_per_epoch, N, 1, D)
-            
-            # 批次处理滑动窗口
-            batch_size = 8  # 减小批次大小以节省内存
+            # 使用DataLoader进行批次训练
             total_loss = 0.0
             total_count = 0
             
-            for i in range(0, training_windows.shape[0], batch_size):
-                batch_windows = training_windows[i:i+batch_size]  # (batch_size, N, seq_len, D)
-                batch_targets = training_targets[i:i+batch_size]  # (batch_size, N, 1, D)
+            for batch_idx, (batch_windows, batch_targets) in enumerate(train_loader):
+                # 将数据移到设备上
+                batch_windows = batch_windows.to(self.device)  # (batch_size, N, seq_len, D)
+                batch_targets = batch_targets.to(self.device)  # (batch_size, N, 1, D)
                 
                 batch_loss = 0.0
                 batch_count = 0
@@ -1615,10 +1613,11 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                     # 用这个窗口预测当前时间戳
                     (window_patch_x, window_patch_recon), (window_score_dy, window_score_st), window_patch_recon_flat, _ = self.model(window)
                     
-                    # 计算重构误差
+                    # 异常恢复预测范式：从注入异常数据预测正常值
                     window_last_recon = self.time_proj(window_patch_recon_flat.transpose(1, 2)).transpose(1, 2)  # (N, 1, D)
-                    window_last_recon_proj = self.last_linear(window_last_recon.squeeze(1)).unsqueeze(1)
-                    window_loss = F.mse_loss(window_last_recon_proj, target)
+                    window_last_recon_proj = self.last_linear(window_last_recon.squeeze(1)).unsqueeze(1)  # 模型学习后预测的正常值
+                    # 损失：预测正常值与未注入异常的真实值的差异（权重从1改为5）
+                    window_loss = 5.0 * F.mse_loss(window_last_recon_proj, target)
                     
                     batch_loss += window_loss
                     batch_count += 1
@@ -1631,8 +1630,8 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                 total_loss += batch_loss.item()
                 total_count += batch_count
                 
-                if self.verbose and (i // batch_size) % 5 == 0:
-                    print(f"   📊 批次 {i//batch_size + 1}/{(training_windows.shape[0] + batch_size - 1)//batch_size}, "
+                if self.verbose and batch_idx % 5 == 0:
+                    print(f"   📊 批次 {batch_idx + 1}/{len(train_loader)}, "
                           f"损失: {batch_loss.item():.6f}")
             
             # 平均滑动窗口损失
@@ -1687,7 +1686,7 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                 else:
                     discrepancy = sym_kl_loss(score_dy_prob, score_st_prob)
                 
-                loss_const = self.loss_weight[0] * discrepancy.mean()  # 动态权重
+                loss_const = self.loss_weight[0] * discrepancy.mean()  # 固定权重0.5
                 
                 # 添加调试信息
                 if epoch == 0:
@@ -1696,18 +1695,18 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
             else:
                 loss_const = 0.0
                 
-            # 聚类损失：使用动态权重
-            loss_cluster = self.loss_weight[1] * cluster_loss  # 动态权重
+            # 聚类损失：使用固定权重
+            loss_cluster = self.loss_weight[1] * cluster_loss  # 固定权重0.5
             
-            # 🆕 滑动窗口损失：固定权重为1
-            loss_sliding_window = 1.0 * loss_sliding_window  # 固定权重1
+            # 🆕 滑动窗口损失：固定权重为5
+            loss_sliding_window = 5.0 * loss_sliding_window  # 固定权重5
             
             # 计算总损失
             total_loss = loss_recon + loss_const + loss_cluster + loss_sliding_window
             
-            # 更新动态权重（一致性损失和聚类损失）
-            if self.use_const:
-                self.update_weight(loss_const, loss_cluster)
+            # 使用固定权重，不更新动态权重
+            # if self.use_const:
+            #     self.update_weight(loss_const, loss_cluster)
             
             self.optimizer.zero_grad()
             total_loss.backward()
@@ -1719,17 +1718,17 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                 print(f"重构损失: {loss_recon:.6f} (权重: 1.0)")
                 print(f"一致性损失: {loss_const:.6f} (权重: {self.loss_weight[0].item():.4f})")
                 print(f"聚类损失: {loss_cluster:.6f} (权重: {self.loss_weight[1].item():.4f})")
-                print(f"🆕 滑动窗口损失: {loss_sliding_window:.6f} (权重: 1.0, 窗口数: {total_count})")
+                print(f"🆕 滑动窗口损失: {loss_sliding_window:.6f} (权重: 5.0, 窗口数: {total_count})")
                 print(f"总损失: {total_loss.item():.6f}")
-                print(f"动态权重更新: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}]")
+                print(f"固定权重: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}]")
             elif epoch % 5 == 0 or epoch == self.epoch - 1:  # 每5个epoch打印一次，以及最后一个epoch
                 print(f"\n=== 第 {epoch+1}/{self.epoch} 个epoch损失详情 ===")
                 print(f"重构损失: {loss_recon:.6f} (权重: 1.0)")
                 print(f"一致性损失: {loss_const:.6f} (权重: {self.loss_weight[0].item():.4f})")
                 print(f"聚类损失: {loss_cluster:.6f} (权重: {self.loss_weight[1].item():.4f})")
-                print(f"🆕 滑动窗口损失: {loss_sliding_window:.6f} (权重: 1.0, 窗口数: {total_count})")
+                print(f"🆕 滑动窗口损失: {loss_sliding_window:.6f} (权重: 5.0, 窗口数: {total_count})")
                 print(f"总损失: {total_loss.item():.6f}")
-                print(f"动态权重: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}]")
+                print(f"固定权重: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}]")
 
             if self.verbose:
                 process.set_postfix(
@@ -1740,7 +1739,7 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
         # 训练结束，打印最终权重信息
         print("\n" + "=" * 60)
         print("训练完成！")
-        print(f"最终动态权重: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}]")
+        print(f"最终固定权重: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}]")
         print("=" * 60)
         
         self.model.eval()
@@ -1801,13 +1800,14 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
             score = score_recon + score_const  # 确保都是(N,)形状
             
         else:
-            # 原始情况：处理整个时间序列，使用滑动窗口聚合
-            print(f"🔄 检测到完整时间序列输入，使用滑动窗口聚合...")
+            # 异常恢复预测范式：处理整个时间序列，使用滑动窗口聚合
+            print(f"🔄 检测到完整时间序列输入，使用异常恢复预测范式...")
             print(f"📊 数据形状: N={N}, T={T}, D={D}")
             print(f"🔍 滑动窗口长度: seq_len={seq_len}")
+            print(f"🎯 评估策略：异常数据 → 预测正常值 → 与异常真实值比较")
             
-            # 使用批次处理避免内存溢出 - 先只处理前100个窗口测试
-            total_windows = min(T - seq_len + 1, 100)  # 只处理前100个窗口
+                        # 使用批次处理避免内存溢出 - 处理所有窗口
+            total_windows = T - seq_len + 1  # 处理所有窗口，使用动态生成避免内存问题
             batch_size = 10  # 大幅减少批次大小，避免内存溢出
             all_window_scores = []
             
@@ -1833,57 +1833,59 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                     # 强制清理GPU内存
                     torch.cuda.empty_cache()
                 
-                # 处理单个窗口
-                (patch_x, patch_recon), (score_dy, score_st), patch_recon_flat, cluster_loss = self.model(window)
-                
-                # 新增last特征loss
-                last_recon = self.time_proj(patch_recon_flat.transpose(1, 2)).transpose(1, 2)  # (N, 1, D)
-                x_last = window[:, -1:, :]  # (N, 1, D) - 取最后一个时间片
-                last_recon_proj = self.last_linear(last_recon.squeeze(1)).unsqueeze(1)  # 线性变换
-                loss_last = F.mse_loss(last_recon_proj, x_last, reduction='none').mean(dim=(1, 2))  # (N,)
-                
-                # 重构损失：固定权重为1
-                if self.use_recon:
-                    print(f"🔍 调试：patch_x shape: {patch_x.shape}")
-                    print(f"🔍 调试：patch_recon shape: {patch_recon.shape}")
-                    recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))  # (N,)
-                    print(f"🔍 调试：recon shape: {recon.shape}")
-                    score_recon = 1.0 * recon  # 固定权重1
-                    print(f"🔍 调试：score_recon shape: {score_recon.shape}")
-                else:
-                    score_recon = torch.zeros_like(loss_last)  # (N,)
+                    # 处理单个窗口
+                    (patch_x, patch_recon), (score_dy, score_st), patch_recon_flat, cluster_loss = self.model(window)
                     
-                # 一致性损失：使用动态权重
-                if self.use_const:
-                    # 确保score_dy和score_st是(N, N)形状
-                    if score_dy.ndim > 2:
-                        score_dy = score_dy.mean(dim=0)  # 从(n_heads, N, N)变成(N, N)
-                    if score_st.ndim > 2:
-                        score_st = score_st.mean(dim=0)  # 从(num_matrices, N, N)变成(N, N)
+                    # 异常恢复预测范式：预测正常值，与异常真实值比较
+                    last_recon = self.time_proj(patch_recon_flat.transpose(1, 2)).transpose(1, 2)  # (N, 1, D)
+                    x_last = window[:, -1:, :]  # (N, 1, D) - 异常数据的最后一个时间片
+                    last_recon_proj = self.last_linear(last_recon.squeeze(1)).unsqueeze(1)  # 预测的正常值
+                    # 异常分数：预测正常值与异常真实值的差异
+                    loss_last = F.mse_loss(last_recon_proj, x_last, reduction='none').mean(dim=(1, 2))  # (N,)
                     
-                    # 初始化score_const
-                    score_const = torch.zeros(N, device=self.device)  # (N,)
-                    
+                    # 重构损失：固定权重为1
+                    if self.use_recon:
+                        print(f"🔍 调试：patch_x shape: {patch_x.shape}")
+                        print(f"🔍 调试：patch_recon shape: {patch_recon.shape}")
+                        recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))  # (N,)
+                        print(f"🔍 调试：recon shape: {recon.shape}")
+                        score_recon = 1.0 * recon  # 固定权重1
+                        print(f"🔍 调试：score_recon shape: {score_recon.shape}")
+                    else:
+                        recon = torch.zeros_like(loss_last)  # 确保recon变量总是被定义
+                        score_recon = torch.zeros_like(loss_last)  # (N,)
+                        
+                    # 一致性损失：使用动态权重
                     if self.use_const:
-                        discrepancy = sym_kl_loss(score_dy, score_st)  # 现在应该是标量
-                        # 确保discrepancy在正确的设备上
-                        if isinstance(discrepancy, torch.Tensor):
-                            discrepancy = discrepancy.to(self.device)
-                        print(f"🔍 调试：discrepancy shape: {discrepancy.shape}")
-                        print(f"🔍 调试：discrepancy value: {discrepancy}")
-                        score_const = self.loss_weight[0] * discrepancy * torch.ones(N, device=self.device)
-                        print(f"🔍 调试：score_const shape: {score_const.shape}")
-                    
-                # 计算总分数
-                window_score = score_recon + score_const  # (N,)
-                print(f"🔍 调试：window_score shape: {window_score.shape}")
-                batch_scores.append(window_score)
-                    
+                        # 确保score_dy和score_st是(N, N)形状
+                        if score_dy.ndim > 2:
+                            score_dy = score_dy.mean(dim=0)  # 从(n_heads, N, N)变成(N, N)
+                        if score_st.ndim > 2:
+                            score_st = score_st.mean(dim=0)  # 从(num_matrices, N, N)变成(N, N)
+                        
+                        # 初始化score_const
+                        score_const = torch.zeros(N, device=self.device)  # (N,)
+                        
+                        if self.use_const:
+                            discrepancy = sym_kl_loss(score_dy, score_st)  # 现在应该是标量
+                            # 确保discrepancy在正确的设备上
+                            if isinstance(discrepancy, torch.Tensor):
+                                discrepancy = discrepancy.to(self.device)
+                            print(f"🔍 调试：discrepancy shape: {discrepancy.shape}")
+                            print(f"🔍 调试：discrepancy value: {discrepancy}")
+                            score_const = self.loss_weight[0] * discrepancy * torch.ones(N, device=self.device)
+                            print(f"🔍 调试：score_const shape: {score_const.shape}")
+                        
+                    # 计算总分数
+                    window_score = score_recon + score_const  # (N,)
+                    print(f"🔍 调试：window_score shape: {window_score.shape}")
+                    batch_scores.append(window_score)
+                        
                     # 立即清理中间变量 - 更彻底的清理
-                del patch_x, patch_recon, score_dy, score_st, patch_recon_flat, cluster_loss
-                del last_recon, last_recon_proj, loss_last, recon, score_recon, score_const
-                del window_score  # 添加这个清理
-                torch.cuda.empty_cache()
+                    del patch_x, patch_recon, score_dy, score_st, patch_recon_flat, cluster_loss
+                    del last_recon, last_recon_proj, loss_last, recon, score_recon, score_const
+                    del window_score  # 添加这个清理
+                    torch.cuda.empty_cache()
                 
                 # 将批次分数添加到总列表中
                 all_window_scores.extend(batch_scores)
@@ -1968,63 +1970,211 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
         else:
             return score
     
-    def get_all_timestamps_scores(self, x):
-        """获取每个区域每个时间戳的异常分数矩阵 (N, T)"""
-        return self.get_last_timestamp_score(x)
+    def get_all_timestamps_scores(self, x, test_X_clean=None, batch_size=10):
+        """获取每个区域每个时间戳的异常分数矩阵 (N, T) - 批量处理版本"""
+        self.model.eval()
+        if isinstance(x, torch.Tensor):
+            x = x.detach().clone().to(self.device)
+        else:
+            x = torch.tensor(x, dtype=torch.float).to(self.device)
+    
+        N, T, D = x.shape
+        seq_len = getattr(self, 'seq_len', 12)  # 默认值12
+    
+        print(f"\n🔧 开始滑动窗口预测...")
+        print(f"📊 数据形状: N={N}, T={T}, D={D}")
+        print(f"🔍 滑动窗口长度: seq_len={seq_len}")
+        print(f"🎯 预测时间戳范围: {seq_len-1} 到 {T-1} (共 {T-seq_len+1} 个时间戳)")
+        print(f"⚡ 批次大小: {batch_size} (每{batch_size}个窗口显示一次进度)")
+    
+        # 加载test_X_clean作为对比基准
+        if test_X_clean is None:
+            try:
+                import os
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                data_dir = os.path.join(base_dir, "data", f"pems0{self.args.dataset if self.args else '3'}")
+                test_X_clean = np.load(os.path.join(data_dir, "test_X_clean.npy"))
+                test_X_clean = test_X_clean.transpose(1, 0, 2)  # (N, T, D)
+                print(f"✅ 成功加载test_X_clean.npy，形状: {test_X_clean.shape}")
+            except Exception as e:
+                print(f"⚠️  无法加载test_X_clean.npy: {e}")
+                test_X_clean = None
         
-    def get_last_timestamp_score(self, x):
-            self.model.eval()
-            if isinstance(x, torch.Tensor):
-                x = x.detach().clone().to(self.device)
-            else:
-                x = torch.tensor(x, dtype=torch.float).to(self.device)
-        
-            N, T, D = x.shape
-        # 获取seq_len
-            seq_len = getattr(self, 'seq_len', 12)  # 默认值12
-        
-            print(f"\n🔧 开始滑动窗口预测...")
-            print(f"📊 数据形状: N={N}, T={T}, D={D}")
-            print(f"🔍 滑动窗口长度: seq_len={seq_len}")
-            print(f"🎯 预测时间戳范围: {seq_len-1} 到 {T-1} (共 {T-seq_len+1} 个时间戳)")
+        if test_X_clean is not None:
+            print(f"🎯 使用异常恢复预测范式：预测正常值 vs 真实正常值")
+        else:
+            print(f"🎯 使用传统重构误差范式：预测值 vs 输入值")
         
         # 初始化完整的(N, T)矩阵，用NaN填充无法预测的时间戳
-            full_scores = np.full((N, T), np.nan)
+        full_scores = np.full((N, T), np.nan)
+    
+        # 批量滑动窗口预测：从第seq_len个时间戳开始预测
+        total_windows = T - seq_len
+        batch_count = 0
         
-        # 滑动窗口预测：从第seq_len个时间戳开始预测
-            total_windows = T - seq_len + 1
-            for t_idx, t in enumerate(range(seq_len-1, T)):
-            # 取前seq_len个时间戳作为输入窗口
-                window = x[:, t-seq_len+1:t+1, :]  # (N, seq_len, D)
+        for batch_start in range(seq_len, T, batch_size):
+            batch_end = min(batch_start + batch_size, T)
+            batch_windows = []
+            batch_timestamps = []
+            
+            # 准备当前批次的窗口数据
+            for t in range(batch_start, batch_end):
+                window = x[:, t-seq_len:t, :]  # (N, seq_len, D)
+                batch_windows.append(window)
+                batch_timestamps.append(t)
+            
+            # 将窗口数据堆叠成批次
+            batch_data = torch.stack(batch_windows, dim=0)  # (batch_size, N, seq_len, D)
             
             # 显示进度
-            if t_idx % 100 == 0 or t_idx == total_windows - 1:
-                print(f"⏳ 处理窗口 {t_idx+1}/{total_windows}: 时间戳 {t-seq_len+1}-{t} → 预测时间戳 {t}")
+            batch_count += 1
+            total_batches = (total_windows + batch_size - 1) // batch_size
+            print(f"⏳ 处理批次 {batch_count}/{total_batches}: 时间戳 {batch_start}-{batch_end-1} (共{len(batch_timestamps)}个窗口)")
             
-            # 用这个窗口预测当前时间戳t的异常
-            with torch.no_grad():
-                (patch_x, patch_recon), (score_dy, score_st), patch_recon_flat, cluster_loss = self.model(window)
-                
-                # 计算重构误差作为异常分数（只计算当前时间戳的重构误差）
-                if self.use_recon:
-                    # 只计算最后一个时间戳的重构误差
-                    last_patch_x = patch_x[:, -1:, :, :]  # 取最后一个patch
-                    last_patch_recon = patch_recon[:, -1:, :, :]  # 取最后一个patch的重构
-                    recon_error = torch.abs(last_patch_x - last_patch_recon).mean((1, 2, 3))  # (N,)
-                else:
-                    recon_error = torch.zeros(N, device=self.device)
-                
-                # 时间戳异常检测只使用重构误差
-                window_score = recon_error  # (N,) - 每个区域在当前时间戳的异常分数
-                
-                # 将分数填入完整矩阵的第t列
-                full_scores[:, t] = window_score.cpu().numpy()
+            # 批量预测
+            try:
+                with torch.no_grad():
+                    # 逐个处理批次中的每个窗口，避免维度问题
+                    batch_scores = []
+                    
+                    for i, t in enumerate(batch_timestamps):
+                        # 取单个窗口
+                        window = batch_data[i]  # (N, seq_len, D)
+                        
+                        # 单个窗口预测
+                        (patch_x, patch_recon), (score_dy, score_st), patch_recon_flat, cluster_loss = self.model(window)
+                    
+                        # 异常恢复预测范式：预测正常值，与真实正常值比较
+                        if self.use_recon:
+                            # 使用异常恢复预测范式
+                            last_recon = self.time_proj(patch_recon_flat.transpose(1, 2)).transpose(1, 2)  # (N, 1, D)
+                            predicted_normal = self.last_linear(last_recon.squeeze(1)).unsqueeze(1)  # (N, 1, D)
+                            
+                            # 添加调试信息
+                            if batch_count == 1 and i == 0:  # 只在第一个批次的第一个窗口打印
+                                print(f"🔍 调试信息 - 窗口 {t}:")
+                                print(f"   patch_recon_flat形状: {patch_recon_flat.shape}")
+                                print(f"   last_recon形状: {last_recon.shape}")
+                                print(f"   predicted_normal形状: {predicted_normal.shape}")
+                                print(f"   predicted_normal范围: [{predicted_normal.min():.6f}, {predicted_normal.max():.6f}]")
+                                print(f"   predicted_normal均值: {predicted_normal.mean():.6f}")
+                        
+                            if test_X_clean is not None:
+                                # 使用test_X_clean作为对比基准
+                                actual_normal = torch.tensor(test_X_clean[:, t:t+1, :], dtype=torch.float).to(self.device)  # (N, 1, D)
+                                # 异常分数：预测正常值与真实正常值的差异
+                                recon_error = torch.abs(predicted_normal - actual_normal).mean((1, 2))  # (N,)
+                                
+                                # 添加调试信息
+                                if batch_count == 1 and i == 0:
+                                    print(f"   actual_normal形状: {actual_normal.shape}")
+                                    print(f"   actual_normal范围: [{actual_normal.min():.6f}, {actual_normal.max():.6f}]")
+                                    print(f"   recon_error范围: [{recon_error.min():.6f}, {recon_error.max():.6f}]")
+                                    print(f"   recon_error均值: {recon_error.mean():.6f}")
+                            else:
+                                # 如果没有test_X_clean，则使用输入数据的最后一个时间片作为对比基准
+                                actual_anomaly = window[:, -1:, :]  # (N, 1, D)
+                                # 异常分数：预测正常值与注入异常真实值的差异
+                                recon_error = torch.abs(predicted_normal - actual_anomaly).mean((1, 2))  # (N,)
+                                
+                                # 添加调试信息
+                                if batch_count == 1 and i == 0:
+                                    print(f"   actual_anomaly形状: {actual_anomaly.shape}")
+                                    print(f"   actual_anomaly范围: [{actual_anomaly.min():.6f}, {actual_anomaly.max():.6f}]")
+                                    print(f"   recon_error范围: [{recon_error.min():.6f}, {recon_error.max():.6f}]")
+                                    print(f"   recon_error均值: {recon_error.mean():.6f}")
+                        else:
+                            recon_error = torch.zeros(N, device=self.device)
+                    
+                        batch_scores.append(recon_error)
+                    
+                    # 将分数填入完整矩阵
+                    for i, t in enumerate(batch_timestamps):
+                        full_scores[:, t] = batch_scores[i].cpu().numpy()
+            except Exception as e:
+                print(f"⚠️  批次 {batch_count} 预测失败: {e}")
+                # 保持NaN值，不进行任何操作
+                pass
         
-            print(f"✅ 滑动窗口预测完成！")
-            print(f"📈 输出形状: {full_scores.shape} (区域数 × 时间戳数)")
-            print(f"📊 异常分数范围: [{np.nanmin(full_scores):.6f}, {np.nanmax(full_scores):.6f}]")
-            print(f"📊 异常分数均值: {np.nanmean(full_scores):.6f}")
-            print(f"📊 可预测时间戳数: {T-seq_len+1}/{T} ({((T-seq_len+1)/T)*100:.1f}%)")
+        print(f"✅ 滑动窗口预测完成！")
+        print(f"📈 输出形状: {full_scores.shape} (区域数 × 时间戳数)")
+        print(f"📊 异常分数范围: [{np.nanmin(full_scores):.6f}, {np.nanmax(full_scores):.6f}]")
+        print(f"📊 异常分数均值: {np.nanmean(full_scores):.6f}")
+        print(f"📊 可预测时间戳数: {T-seq_len+1}/{T} ({((T-seq_len+1)/T)*100:.1f}%)")
+        print(f"⚡ 进度显示优化: 每{batch_size}个窗口显示一次进度")
+        return full_scores
+
+
+class SlidingWindowDataset(torch.utils.data.Dataset):
+    """动态滑动窗口数据集，避免一次性加载所有窗口到内存"""
+    
+    def __init__(self, data, seq_len, target_len=1):
+        """
+        Args:
+            data: (N, T, D) 原始数据
+            seq_len: 滑动窗口长度
+            target_len: 目标长度（通常为1）
+        """
+        self.data = data
+        self.seq_len = seq_len
+        self.target_len = target_len
+        self.N, self.T, self.D = data.shape
+        self.num_windows = self.T - self.seq_len
         
-            return full_scores
+    def __len__(self):
+        # 确保有足够的数据来预测下一个时间戳
+        return max(0, self.num_windows)
+    
+    def __getitem__(self, idx):
+        """动态生成滑动窗口样本"""
+        # 计算时间戳范围
+        start_idx = idx
+        end_idx = start_idx + self.seq_len
+        target_start = end_idx  # 预测下一个时间戳
+        target_end = target_start + self.target_len
+        
+        # 动态切片，不预先加载
+        window = self.data[:, start_idx:end_idx, :]  # (N, seq_len, D)
+        target = self.data[:, target_start:target_end, :]  # (N, target_len, D)
+        
+        return window, target
+
+
+class AnomalyRecoveryDataset(torch.utils.data.Dataset):
+    """异常恢复预测数据集：从异常数据恢复到正常数据"""
+    
+    def __init__(self, anomaly_data, clean_data, seq_len, target_len=1):
+        """
+        Args:
+            anomaly_data: (N, T, D) 异常数据
+            clean_data: (N, T, D) 正常数据
+            seq_len: 滑动窗口长度
+            target_len: 目标长度（通常为1）
+        """
+        self.anomaly_data = anomaly_data
+        self.clean_data = clean_data
+        self.seq_len = seq_len
+        self.target_len = target_len
+        self.N, self.T, self.D = anomaly_data.shape
+        self.num_windows = self.T - self.seq_len
+        
+    def __len__(self):
+        # 确保有足够的数据来预测下一个时间戳
+        return max(0, self.num_windows)
+    
+    def __getitem__(self, idx):
+        """动态生成异常恢复样本"""
+        # 计算时间戳范围
+        start_idx = idx
+        end_idx = start_idx + self.seq_len
+        target_start = end_idx  # 预测下一个时间戳
+        target_end = target_start + self.target_len
+        
+        # 输入：注入异常数据的滑动窗口 (N, 12, D)
+        window = self.anomaly_data[:, start_idx:end_idx, :]  # (N, seq_len, D)
+        
+        # 目标：未注入异常数据中对应时间点的值 (N, 1, D)
+        target = self.clean_data[:, target_start:target_end, :]  # (N, target_len, D)
+        
+        return window, target
 

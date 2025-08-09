@@ -25,7 +25,7 @@ def load_dataset(args):
     data_dir = os.path.abspath(data_dir)
 
     # 加载交通流量数据（已归一化/异常注入）
-    X = np.load(os.path.join(data_dir, "X_anom.npy"))    # shape: (天数*时间步, 节点数)
+    X = np.load(os.path.join(data_dir, "X_anom.npy"))    # shape: (时间步, 节点数, 特征维度)
     test_X_anom = np.load(os.path.join(data_dir, "test_X_anom.npy"))
     
     # 加载clean data
@@ -62,13 +62,13 @@ def load_dataset(args):
     total_steps = X.shape[0]
     time_slots_per_day = 288
     n_days = total_steps // time_slots_per_day
-    # 训练集
-    X = X.reshape(-1, n_nodes).T[:, :, None]  # (节点数, 总时间步, 1)
-    X_clean = X_clean.reshape(-1, n_nodes).T[:, :, None]  # clean data也做相同的reshape
+    # 训练集 - 简化变换：直接转置
+    X = X.transpose(1, 0, 2)  # (节点数, 总时间步, 特征维度)
+    X_clean = X_clean.transpose(1, 0, 2)  # clean data也做相同的转置
     val_X = X.copy()  # 这里val_X直接用训练集（如需分割可自行调整）
     # 测试集
-    test_X = test_X_anom.reshape(-1, n_nodes).T[:, :, None]
-    test_X_clean = test_X_clean.reshape(-1, n_nodes).T[:, :, None]
+    test_X = test_X_anom.transpose(1, 0, 2)
+    test_X_clean = test_X_clean.transpose(1, 0, 2)
 
     # 标签按区域聚合
     y = (y_test != 0).any(axis=0).astype(float)  # 只要某区域有任意时间戳为异常就为1

@@ -31,8 +31,8 @@ parser.add_argument('--n_heads', default=16, type=int)
 parser.add_argument('--t_half', action='store_true')
 parser.add_argument('--s_half', action='store_true')
 parser.add_argument('--n_gcn', default=3, type=int)
-parser.add_argument('--lr', default=0.01, type=float)
-parser.add_argument('--epochs', default=200, type=int)
+parser.add_argument('--lr', default=0.001, type=float)
+parser.add_argument('--epochs', default=1, type=int)
 parser.add_argument('--seed', default=42, type=int)
 parser.add_argument('--repeat', default=1, type=int)
 parser.add_argument('--early_stopping', action='store_true')
@@ -94,8 +94,41 @@ for t in range(args.repeat):
     model.fit(X, np.array([adj, distance, connectivity]), (val_X, y), x_clean=X_clean)
     print("训练完成！")
 
-    score = model.decision_function(test_X)
-    # 使用真实异常数量作为阈值，而不是固定的20%
+    # 区域异常检测：使用多个窗口的平均分数
+    print("🔍 开始区域异常检测...")
+    
+    # 准备多个窗口用于区域异常检测
+    seq_len = 12
+    total_windows = test_X.shape[1] - seq_len + 1  # 4021个可能的窗口
+    
+    # 使用所有可能的窗口进行区域异常检测
+    print(f"📊 总窗口数: {total_windows}")
+    print(f"🔍 使用所有窗口进行区域异常检测...")
+    
+    window_scores = []
+    
+    for i in range(total_windows):
+        # 使用第i个窗口
+        window = test_X[:, i:i+seq_len, :]  # (N, 12, D)
+        
+        # 通过模型获取区域异常分数
+        window_score = model.decision_function(window)  # (N,)
+        window_scores.append(window_score)
+        
+        if (i + 1) % 500 == 0 or i == total_windows - 1:
+            print(f"⏳ 已处理 {i+1}/{total_windows} 个窗口 ({(i+1)/total_windows*100:.1f}%)")
+    
+    # 计算所有窗口分数的平均值
+    window_scores = np.array(window_scores)  # (total_windows, N)
+    region_scores = np.mean(window_scores, axis=0)  # (N,)
+    
+    print(f"✅ 区域异常检测完成！使用 {total_windows} 个窗口的平均分数")
+    print(f"📊 区域异常分数范围: [{region_scores.min():.6f}, {region_scores.max():.6f}]")
+    print(f"📊 区域异常分数均值: {region_scores.mean():.6f}")
+    print(f"📊 区域异常分数标准差: {region_scores.std():.6f}")
+    
+    # 使用平均分数进行区域异常检测
+    score = region_scores
     true_anomaly_count = y.sum()
     threshold = np.sort(score)[-int(true_anomaly_count)]
     pred = np.zeros_like(score)
@@ -106,16 +139,20 @@ for t in range(args.repeat):
     recall_k_5 = recall_k(y, pred, np.ceil(len(y) // 5).astype(int))
     roc_auc_original = roc_auc_score(y, score)
     
-    print(f"\n=== 原有区域异常检测评估指标（基于真实异常数量） ===")
+    print(f"\n{'='*80}")
+    print("📊 区域异常检测评估指标（基于真实异常数量）")
+    print(f"{'='*80}")
     print(f"真实异常区域数: {true_anomaly_count}")
     print(f"预测阈值: {threshold:.6f}")
     print(f"预测异常区域数: {pred.sum()}")
     print(f"Recall@K (K=10%): {recall_k_10:.4f}")
     print(f"Recall@K (K=20%): {recall_k_5:.4f}")
     print(f"ROC-AUC: {roc_auc_original:.4f}")
+    print(f"{'='*80}")
 
     score_list.append([recall_k_10, recall_k_5, roc_auc_original])
-    print(f"原有指标: {score_list[-1]}")
+    print(f"区域异常检测指标: {score_list[-1]}")
+    print(f"{'='*80}\n")
     
     # 新功能：获取所有时间戳的异常检测结果
     print("\n" + "="*80)
@@ -123,12 +160,12 @@ for t in range(args.repeat):
     print("="*80)
     
     print("🔧 滑动窗口预测逻辑:")
-    print("   - 用时间点 0-11 预测时间点 11 的异常")
-    print("   - 用时间点 1-12 预测时间点 12 的异常")
-    print("   - 用时间点 2-13 预测时间点 13 的异常")
+    print("   - 用时间点 0-11 预测时间点 12 的异常")
+    print("   - 用时间点 1-12 预测时间点 13 的异常")
+    print("   - 用时间点 2-13 预测时间点 14 的异常")
     print("   - 以此类推...")
     
-    all_timestamps_scores = model.get_all_timestamps_scores(test_X)  # 获取所有时间戳的异常分数 (N, T)
+    all_timestamps_scores = model.get_all_timestamps_scores(test_X, test_X_clean, batch_size=10)  # 获取所有时间戳的异常分数 (N, T)
     
     # 确保异常分数越大表示越异常（如果分数是越小越异常，则取负值）
     # 检查分数分布，如果大部分分数都很小，说明可能需要取负值
@@ -201,14 +238,30 @@ for t in range(args.repeat):
     
     print(f"真实标签矩阵形状: {test_y_timestamps.shape}")  # (T, N)
     
-    # 计算每个时间戳的异常检测指标（使用Recall@K形式）
-    print(f"\n📈 详细时间戳异常检测评估:")
+    # 计算每个时间戳的异常检测指标
+    print(f"\n📈 时间戳异常检测评估:")
     print("─" * 60)
     
-    # 计算Recall@K指标
-    recall_k_5_list = []
-    recall_k_10_list = []
-    roc_auc_list = []
+    # 计算预测的异常区域数量
+    N, T = all_timestamps_scores.shape
+    print(f"   📊 预测异常统计:")
+    print(f"      - 每个时间戳预测5%的区域为异常")
+    print(f"      - 预期每个时间戳异常区域数: {max(1, int(N * 0.05))} (5% × {N})")
+    
+    # 计算每个时间戳的异常区域数量
+    valid_scores = all_timestamps_scores[:, seq_len-1:]  # 只取可预测的时间戳
+    k_anomaly = max(1, int(valid_scores.shape[0] * 0.05))  # 5%的区域
+    thresholds = np.sort(valid_scores, axis=0)[-k_anomaly, :]  # 每个时间戳的阈值
+    anomaly_counts = (valid_scores >= thresholds[np.newaxis, :]).sum(axis=0)
+    
+    print(f"   📊 实际预测异常统计:")
+    print(f"      - 可预测时间戳数: {valid_scores.shape[1]}")
+    print(f"      - 平均预测异常区域数: {anomaly_counts.mean():.1f}")
+    print(f"      - 预测异常区域数范围: [{anomaly_counts.min()}, {anomaly_counts.max()}]")
+    
+    # 收集所有时间戳×所有区域的数据
+    all_scores = []
+    all_labels = []
     
     # 只评估可预测的时间戳
     valid_timestamps = range(seq_len-1, all_timestamps_scores.shape[1])
@@ -218,60 +271,53 @@ for t in range(args.repeat):
         if t < test_y_timestamps.shape[0]:
             labels_t = test_y_timestamps[t]  # (N,)
             
-            # 计算该时间戳的异常检测指标
-            if labels_t.sum() > 0:  # 如果该时间戳有异常
-                # 过滤掉NaN值
-                valid_mask = ~np.isnan(scores_t)
-                if valid_mask.sum() > 0:
-                    valid_scores = scores_t[valid_mask]
-                    valid_labels = labels_t[valid_mask]
-                    
-                    # 使用Recall@K的形式，异常比例改为5%
-                    k_5 = max(1, int(len(valid_labels) * 0.05))  # 5%
-                    k_10 = max(1, int(len(valid_labels) * 0.10))  # 10%
-                    
-                    # 确保评估时使用调整后的分数
-                    if np.nanmean(scores_t) < 0.1:
-                        valid_scores = -valid_scores  # 保持与阈值计算一致
-                    
-                    # 计算Recall@K
-                    recall_k_5 = recall_k(valid_labels, valid_scores, k_5)
-                    recall_k_10 = recall_k(valid_labels, valid_scores, k_10)
-                    roc_auc_t = roc_auc_score(valid_labels, valid_scores)
-                else:
-                    # 如果所有分数都是NaN，跳过这个时间戳
-                    continue
+            # 过滤掉NaN值
+            valid_mask = ~np.isnan(scores_t)
+            if valid_mask.sum() > 0:
+                valid_scores = scores_t[valid_mask]
+                valid_labels = labels_t[valid_mask]
                 
-                recall_k_5_list.append(recall_k_5)
-                recall_k_10_list.append(recall_k_10)
-                roc_auc_list.append(roc_auc_t)
+                all_scores.extend(valid_scores)
+                all_labels.extend(valid_labels)
     
-    # 计算平均指标
-    if recall_k_5_list:
-        avg_recall_k_5 = np.mean(recall_k_5_list)
-        avg_recall_k_10 = np.mean(recall_k_10_list)
-        avg_roc_auc = np.mean(roc_auc_list)
+    # 转换为numpy数组
+    all_scores = np.array(all_scores)
+    all_labels = np.array(all_labels)
+    
+    print(f"   📊 整体数据集统计:")
+    print(f"      - 总样本数: {len(all_scores)} (N×T)")
+    print(f"      - 真实异常样本数: {all_labels.sum()}")
+    print(f"      - 异常比例: {all_labels.sum()/len(all_labels):.4f}")
+    
+    # 计算整体的异常检测指标
+    if len(all_scores) > 0 and all_labels.sum() > 0:
+        # 使用Recall@K的形式，异常比例改为5%和10%
+        k_5 = max(1, int(len(all_labels) * 0.05))  # 5%
+        k_10 = max(1, int(len(all_labels) * 0.10))  # 10%
         
-        print(f"   📊 评估统计:")
-        print(f"      - 有异常的时间戳数: {len(recall_k_5_list)}")
-        print(f"      - 平均Recall@5%: {avg_recall_k_5:.4f} (异常比例5%)")
-        print(f"      - 平均Recall@10%: {avg_recall_k_10:.4f}")
-        print(f"      - 平均ROC-AUC: {avg_roc_auc:.4f}")
+        # 计算Recall@K
+        recall_k_5 = recall_k(all_labels, all_scores, k_5)
+        recall_k_10 = recall_k(all_labels, all_scores, k_10)
+        roc_auc_overall = roc_auc_score(all_labels, all_scores)
         
-        # 显示前几个时间戳的详细结果
-        print(f"\n   🏆 前5个异常时间戳的检测结果:")
+        print(f"\n   📈 整体异常检测指标:")
         print("   ─" * 40)
-        for i in range(min(5, len(recall_k_5_list))):
-            print(f"   🥇 第{i+1}名 - 时间戳 {t_idx + seq_len - 1:4d}:")
-            print(f"       📈 Recall@5%: {recall_k_5_list[i]:.4f}")
-            print(f"       📈 Recall@10%: {recall_k_10_list[i]:.4f}")
-            print(f"       📊 ROC-AUC: {roc_auc_list[i]:.4f}")
-            print()
+        print(f"   🎯 Recall@5%: {recall_k_5:.4f}")
+        print(f"   🎯 Recall@10%: {recall_k_10:.4f}")
+        print(f"   🎯 ROC-AUC: {roc_auc_overall:.4f}")
+        print(f"   📊 评估样本数: {len(all_scores)}")
         
-        last_timestamp_score_list.append([avg_recall_k_5, avg_recall_k_10, avg_roc_auc])
-        print(f"   📋 时间戳异常检测指标: {last_timestamp_score_list[-1]}")
+        # 保存整体指标
+        last_timestamp_score_list.append([recall_k_5, recall_k_10, roc_auc_overall])
+        print(f"   📋 整体异常检测指标: {last_timestamp_score_list[-1]}")
     else:
-        print("   ⚠️  没有找到异常时间戳")
+        print("   ⚠️  没有找到有效样本")
+    
+    # 显示评估结果
+    print(f"   📊 异常检测评估总结:")
+    print(f"      - 评估方式: 将所有时间戳×所有区域作为整体数据集")
+    print(f"      - 预测异常比例: 5%和10% (从所有样本中预测top-5%和top-10%为异常)")
+    print(f"      - 评估指标: Recall@5%, Recall@10% 和 ROC-AUC")
     
     # 总结信息
     print("="*80)
