@@ -236,7 +236,7 @@ class STPatchFormer(nn.Module):
         # 🔧 修复：确保返回正确的注意力分数形状，回归Origin设计
         if isinstance(attn, torch.Tensor) and attn.dim() == 4:
             # attn: (VAR*NP, H, N, N) -> score_dy: (N, N)
-            score_dy = attn.max(dim=0).values.mean(dim=0)  # tokens取max，heads取mean，提高可分性
+            score_dy = attn.mean(dim=(0, 1))  # 只对tokens和heads维度平均
         else:
             score_dy = attn
             

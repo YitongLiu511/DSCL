@@ -1282,11 +1282,17 @@ class STPatchFormerDetector(BaseDetector):
 
             if self.verbose:
                 if evaluate is not None:
-                    print("AUC: {:.3f}/{:.3f}, weight: {:.3f}".format(
-                        auc, self.early_stopping.best_score, self.loss_weight[0]
-                    ))
+                    process.set_postfix(
+                        max_auc="AUC: {:.3f}/{:.3f}, weight : {:.3f}".format(
+                            auc, self.early_stopping.best_score,
+                            self.loss_weight[0]),
+                        refresh=True,
+                    )
                 else:
-                    print("loss: {:.5f}".format(total_loss.item()))
+                    process.set_postfix(
+                        max_auc="loss: {:.5f}".format(loss.item()),
+                        refresh=True,
+                    )
         self.model.load_state_dict(torch.load(self.early_stopping.path))
         self.model.eval()
         self.decision_scores_ = self.decision_function(x)
@@ -1698,31 +1704,37 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
             else:
                 loss_recon = 0.0
                 
-            # 一致性损失：空间一致性KL（支持差分+停梯度，可选）
+            # 一致性损失：使用动态权重
             if self.use_const:
+                # 🔧 修复：回归Origin设计，直接使用原始注意力分数
                 # 确保score_dy和score_st都是(N, N)形状
                 if score_dy.dim() == 4:  # (VAR*NP, H, N, N)
                     score_dy_reshaped = score_dy.mean(dim=(0, 1))  # (N, N)
                 else:
                     score_dy_reshaped = score_dy
+                
                 if score_st.dim() > 2:  # (VAR*NP, N, N)
                     score_st_reshaped = score_st.mean(dim=0)  # (N, N)
                 else:
                     score_st_reshaped = score_st
-
-                # 行归一化 + 数值稳定，保证KL的概率分布前提
-                a = torch.clamp(score_dy_reshaped, min=1e-8)
-                a = a / (a.sum(dim=-1, keepdim=True) + 1e-8)
-                b = torch.clamp(score_st_reshaped, min=1e-8)
-                b = b / (b.sum(dim=-1, keepdim=True) + 1e-8)
-
-                # 根据diff_const选择差分+停梯度或对称KL
-                if self.diff_const:
-                    discrepancy = sym_kl_loss(a, b.detach()) - sym_kl_loss(a.detach(), b)
-                else:
-                    discrepancy = sym_kl_loss(a, b)
-
+                
+                # 🔧 关键修复：直接使用原始分数，不进行softmax处理
+                # 回归Origin的简单设计：discrepancy = sym_kl_loss(score_dy, score_st)
+                discrepancy = sym_kl_loss(score_dy_reshaped, score_st_reshaped)
+                
+                # 添加调试信息
+                if epoch == 0:
+                    print(f"   🔍 调试信息 - score_dy原始形状: {score_dy.shape}, 范围: [{score_dy.min():.6f}, {score_dy.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_dy重塑后形状: {score_dy_reshaped.shape}, 范围: [{score_dy_reshaped.min():.6f}, {score_dy_reshaped.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_st形状: {score_st.shape}, 范围: [{score_st.min():.6f}, {score_st.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_st重塑后形状: {score_st_reshaped.shape}, 范围: [{score_st_reshaped.min():.6f}, {score_st_reshaped.max():.6f}]")
+                    print(f"   🔍 调试信息 - discrepancy值: {discrepancy:.6f}")
+                
                 loss_const = self.loss_weight[0] * discrepancy
+                
+                # 添加调试信息
+                if epoch == 0:
+                    print(f"   🔍 调试信息 - loss_const: {loss_const:.6f}")
             else:
                 loss_const = 0.0
                 
@@ -1932,22 +1944,15 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
             else:
                 score_recon = torch.zeros_like(loss_last)  # (N,)
                 
-            # 一致性损失：空间一致性KL（支持差分+停梯度，可选）
+            # 一致性损失：对齐 origin v3（不额外 softmax/温度）
             if self.use_const:
                 if score_dy.dim() > 2:
                     score_dy = score_dy.mean(dim=0)  # (N, N)
                 if score_st.dim() > 2:
                     score_st = score_st.mean(dim=0)  # (N, N)
-                # 行归一化 + 数值稳定
-                a = torch.clamp(score_dy, min=1e-8)
-                a = a / (a.sum(dim=-1, keepdim=True) + 1e-8)
-                b = torch.clamp(score_st, min=1e-8)
-                b = b / (b.sum(dim=-1, keepdim=True) + 1e-8)
-                # 差分+停梯度或对称KL
-                if self.diff_const:
-                    discrepancy = sym_kl_loss(a, b.detach()) - sym_kl_loss(a.detach(), b)
-                else:
-                    discrepancy = sym_kl_loss(a, b)
+                discrepancy = sym_kl_loss(score_dy, score_st.detach()) - sym_kl_loss(
+                    score_dy.detach(), score_st
+                )
                 score_const = self.loss_weight[0] * discrepancy * torch.ones_like(loss_last)
             else:
                 score_const = torch.zeros_like(loss_last)  # (N,)
@@ -2015,24 +2020,22 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                     if self.use_const:
                         # 确保score_dy和score_st是(N, N)形状
                         if score_dy.ndim > 2:
-                            score_dy = score_dy.mean(dim=0)  # (N, N)
+                            score_dy = score_dy.mean(dim=0)  # 从(n_heads, N, N)变成(N, N)
                         if score_st.ndim > 2:
-                            score_st = score_st.mean(dim=0)  # (N, N)
-
-                        # 行归一化 + 数值稳定
-                        a = torch.clamp(score_dy, min=1e-8)
-                        a = a / (a.sum(dim=-1, keepdim=True) + 1e-8)
-                        b = torch.clamp(score_st, min=1e-8)
-                        b = b / (b.sum(dim=-1, keepdim=True) + 1e-8)
-
-                        # 差分+停梯度或对称KL
-                        if self.diff_const:
-                            discrepancy = sym_kl_loss(a, b.detach()) - sym_kl_loss(a.detach(), b)
-                        else:
-                            discrepancy = sym_kl_loss(a, b)
-
+                            score_st = score_st.mean(dim=0)  # 从(num_matrices, N, N)变成(N, N)
+                        
                         # 初始化score_const
-                        score_const = self.loss_weight[0] * discrepancy * torch.ones(N, device=self.device)
+                        score_const = torch.zeros(N, device=self.device)  # (N,)
+                        
+                        if self.use_const:
+                            discrepancy = sym_kl_loss(score_dy, score_st)  # 现在应该是标量
+                            # 确保discrepancy在正确的设备上
+                            if isinstance(discrepancy, torch.Tensor):
+                                discrepancy = discrepancy.to(self.device)
+                            print(f"🔍 调试：discrepancy shape: {discrepancy.shape}")
+                            print(f"🔍 调试：discrepancy value: {discrepancy}")
+                            score_const = self.loss_weight[0] * discrepancy * torch.ones(N, device=self.device)
+                            print(f"🔍 调试：score_const shape: {score_const.shape}")
                         
                     # 计算总分数
                     window_score = score_recon + score_const  # (N,)
