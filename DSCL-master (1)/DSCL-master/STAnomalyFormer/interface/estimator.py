@@ -1202,15 +1202,7 @@ class STPatchFormerDetector(BaseDetector):
         self.diff_const = diff_const
         assert self.use_recon or self.use_const
 
-        # 初始化损失权重
-        if self.diff_const:
-            # 动态权重：根据损失值动态调整权重
-            self.loss_weight = torch.tensor([0.5, 0.5, 1.0], device=self.device)  # [一致性, 聚类, DCdetector]
-        else:
-            # 固定权重：使用固定的权重配置
-            # 🔧 修复：调整权重配置，降低聚类损失，增加一致性损失
-            self.loss_weight = torch.tensor([2.0, 0.1, 1.0], device=self.device)  # [一致性, 聚类, DCdetector]
-
+        self.loss_weight = torch.ones(2, device=self.device) / 2
         self.last_linear = nn.Linear(d_in, d_in).to(self.device)  # 线性层移到这里
         # 计算时间维度：NP*PL = ((seq_len - patch_len) // stride + 1) * patch_len
         time_dim = ((self.model_args['seq_len'] - self.model_args['patch_len']) // self.model_args['stride'] + 1) * self.model_args['patch_len']
@@ -1555,14 +1547,11 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
         except Exception:
             pass
         
-        # 初始化损失权重
-        if self.diff_const:
-            # 动态权重：根据损失值动态调整权重
-            self.loss_weight = torch.tensor([0.5, 0.5, 1.0], device=self.device)  # [一致性, 聚类, DCdetector]
-        else:
-            # 固定权重：使用固定的权重配置
-            # 🔧 修复：调整权重配置，降低聚类损失，增加一致性损失
-            self.loss_weight = torch.tensor([2.0, 0.1, 1.0], device=self.device)  # [一致性, 聚类, DCdetector]
+        # 修改损失权重初始化：使用固定权重
+        # loss_weight[0]: 一致性损失权重（固定为0.5）
+        # loss_weight[1]: 聚类损失权重（固定为0.5）
+        # loss_weight[2]: DCdetector损失权重（固定为dcdetector_weight）
+        self.loss_weight = torch.tensor([0.5, 0.5, self.dcdetector_weight], device=self.device)
 
     def fit(self, x, mats, evaluate=None, x_clean=None):
         print("开始fit方法...")
@@ -1706,40 +1695,46 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                 
             # 一致性损失：使用动态权重
             if self.use_const:
-                # 🔧 修复：回归Origin设计，直接使用原始注意力分数
-                # 确保score_dy和score_st都是(N, N)形状
-                if score_dy.dim() == 4:  # (VAR*NP, H, N, N)
-                    score_dy_reshaped = score_dy.mean(dim=(0, 1))  # (N, N)
+                # 修复形状不匹配问题
+                if score_dy.dim() == 4:  # (2, 4, 358, 358)
+                    # 取平均值来降维
+                    score_dy_reshaped = score_dy.mean(dim=(0, 1))  # (358, 358)
                 else:
                     score_dy_reshaped = score_dy
                 
-                if score_st.dim() > 2:  # (VAR*NP, N, N)
-                    score_st_reshaped = score_st.mean(dim=0)  # (N, N)
-                else:
-                    score_st_reshaped = score_st
-                
-                # 🔧 关键修复：直接使用原始分数，不进行softmax处理
-                # 回归Origin的简单设计：discrepancy = sym_kl_loss(score_dy, score_st)
-                discrepancy = sym_kl_loss(score_dy_reshaped, score_st_reshaped)
+                # 🔧 修复：使用温度参数让分布更有区分度
+                temperature = 0.1  # 较小的温度让分布更尖锐
+                score_dy_prob = F.softmax(score_dy_reshaped / temperature, dim=-1)  # 在最后一个维度上softmax
+                score_st_prob = F.softmax(score_st / temperature, dim=-1)  # 在最后一个维度上softmax
                 
                 # 添加调试信息
                 if epoch == 0:
                     print(f"   🔍 调试信息 - score_dy原始形状: {score_dy.shape}, 范围: [{score_dy.min():.6f}, {score_dy.max():.6f}]")
                     print(f"   🔍 调试信息 - score_dy重塑后形状: {score_dy_reshaped.shape}, 范围: [{score_dy_reshaped.min():.6f}, {score_dy_reshaped.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_dy概率分布形状: {score_dy_prob.shape}, 范围: [{score_dy_prob.min():.6f}, {score_dy_prob.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_dy概率分布每行和: [{score_dy_prob.sum(dim=-1).min():.6f}, {score_dy_prob.sum(dim=-1).max():.6f}]")
                     print(f"   🔍 调试信息 - score_st形状: {score_st.shape}, 范围: [{score_st.min():.6f}, {score_st.max():.6f}]")
-                    print(f"   🔍 调试信息 - score_st重塑后形状: {score_st_reshaped.shape}, 范围: [{score_st_reshaped.min():.6f}, {score_st_reshaped.max():.6f}]")
-                    print(f"   🔍 调试信息 - discrepancy值: {discrepancy:.6f}")
+                    print(f"   🔍 调试信息 - score_st概率分布形状: {score_st_prob.shape}, 范围: [{score_st_prob.min():.6f}, {score_st_prob.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_st概率分布每行和: [{score_st_prob.sum(dim=-1).min():.6f}, {score_st_prob.sum(dim=-1).max():.6f}]")
                 
-                loss_const = self.loss_weight[0] * discrepancy
+                if self.diff_const:
+                    discrepancy = sym_kl_loss(score_dy_prob,
+                                              score_st_prob.detach()) - sym_kl_loss(
+                                                  score_dy_prob.detach(), score_st_prob)
+                else:
+                    discrepancy = sym_kl_loss(score_dy_prob, score_st_prob)
+                
+                loss_const = self.loss_weight[0] * discrepancy.mean()  # 固定权重0.5
                 
                 # 添加调试信息
                 if epoch == 0:
+                    print(f"   🔍 调试信息 - discrepancy形状: {discrepancy.shape}, 值: {discrepancy.mean():.6f}")
                     print(f"   🔍 调试信息 - loss_const: {loss_const:.6f}")
             else:
                 loss_const = 0.0
                 
             # 聚类损失：使用固定权重
-            loss_cluster = self.loss_weight[1] * cluster_loss  # 使用权重[1]
+            loss_cluster = self.loss_weight[1] * cluster_loss  # 固定权重0.5
             
             # 🆕 DCdetector对比学习损失（空间 + 时间）
             loss_dcdetector = 0.0
@@ -1834,7 +1829,7 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
             # loss_sliding_window = 5.0 * loss_sliding_window  # 固定权重5
             
             # 计算总损失
-            total_loss = loss_recon + loss_const + loss_cluster + self.loss_weight[2] * loss_dcdetector
+            total_loss = loss_recon + loss_const + loss_cluster + loss_dcdetector  # + loss_sliding_window
             
             # 使用固定权重，不更新动态权重
             # if self.use_const:

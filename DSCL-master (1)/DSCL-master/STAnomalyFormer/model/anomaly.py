@@ -231,23 +231,15 @@ class STPatchFormer(nn.Module):
         z = clustered_embeddings.transpose(0, 1)  # (VAR*NP, N, D)
 
         dy_z, attn = self.spatial_tsfm(z)  # dy_z: (VAR * NP, N, D); attn: (VAR*NP, H, N, N)
-        st_z, graph = self.da_gcn(z)  # (VAR * NP, N, D)
-        
-        # 🔧 修复：确保返回正确的注意力分数形状，回归Origin设计
+        # 内存优化：将 [VAR*NP, H, N, N] 的注意力即时聚合为 [N, N]，避免在上游长期保留巨型张量
         if isinstance(attn, torch.Tensor) and attn.dim() == 4:
-            # attn: (VAR*NP, H, N, N) -> score_dy: (N, N)
-            score_dy = attn.mean(dim=(0, 1))  # 只对tokens和heads维度平均
-        else:
-            score_dy = attn
-            
-        if isinstance(graph, torch.Tensor) and graph.dim() > 2:
-            # graph: (VAR*NP, N, N) -> score_st: (N, N)
-            score_st = graph.mean(dim=0)  # 只对tokens维度平均
-        else:
-            score_st = graph
-        
+            attn = attn.mean(dim=(0, 1))  # -> [N, N]
+        st_z, graph = self.da_gcn(z)  # (VAR * NP, N, D)
         if not return_recon:
-            return score_dy, score_st
+            # 将注意力聚合成 [N,N] 提升区分度：tokens 维取 max，heads 维取 mean
+            if isinstance(attn, torch.Tensor) and attn.dim() == 4:
+                attn = attn.max(dim=0).values.mean(dim=0)
+            return attn, graph
 
         if self.dynamic_only:
             z = self.proj_dy(dy_z)  # (VAR * NP, N, PL)
@@ -266,7 +258,7 @@ class STPatchFormer(nn.Module):
         ).permute(2, 1, 3, 0)  # (N, NP, PL, VAR)
         z = self.revin(z, 'denorm')
         z_flat = z.reshape(z.shape[0], -1, z.shape[-1])  # (N, NP*PL, VAR) - 只是reshape
-        return (patch_x.transpose(2, 3), z), (score_dy, score_st), z_flat, cluster_loss
+        return (patch_x.transpose(2, 3), z), (attn, graph), z_flat, cluster_loss
 
 
 class STPatchMaskFormer(STPatchFormer):
