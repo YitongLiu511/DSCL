@@ -156,6 +156,8 @@ class PatchEncoder(nn.Module):
         half: bool = False,
         pe='zeros',
         learn_pe=True,
+        use_inpatch_attn: bool = False,
+        inpatch_pe: str = 'sincos',
     ):
 
         super().__init__()
@@ -166,16 +168,45 @@ class PatchEncoder(nn.Module):
         self.shared_embedding = shared_embedding
         self.n_heads = n_heads
 
-        # Input encoding: projection of feature vectors onto a d-dim vector space
-        if not shared_embedding:
-            self.W_P = nn.ModuleList()
-            for _ in range(self.n_vars):
-                self.W_P.append(nn.Linear(
-                    patch_len,
-                    d_model,
-                ))
+        # 选项1：使用 in-patch 注意力将 (patch_len) 序列编码成 d_model
+        self.use_inpatch_attn = use_inpatch_attn
+        if self.use_inpatch_attn:
+            # 将每个时间步标量嵌入到 d_model，并在 patch_len 维度上做 Transformer，再池化
+            self.inpatch_value_embed = nn.Linear(1, d_model)
+            self.inpatch_W_pos = positional_encoding(
+                inpatch_pe,
+                True,
+                patch_len,
+                d_model,
+            )
+            # 开启返回注意力权重，以便上游提取每个patch内的时间戳注意力
+            self.inpatch_encoder = TemporalTransformer(
+                d_model=d_model,
+                dim_k=d_model // n_heads,
+                dim_v=d_model // n_heads,
+                n_heads=n_heads,
+                dim_fc=d_ff,
+                dropout=attn_dropout,
+                half=half,
+                return_attn=True,
+            )
+            # 用于缓存最近一次forward的patch内注意力 (B', H, PL, PL)（注意：可能在CPU上）
+            self.last_inpatch_attn = None
+            # 微批大小：控制 in-patch 注意力在 batch 维度上的分块，避免一次性在 GPU 上产生巨型张量
+            # 可按需调整；默认 2048 在 24GB 显存上较稳妥
+            self.inpatch_batch_size = 2048
         else:
-            self.W_P = nn.Linear(patch_len, d_model)
+            # 选项2：旧实现，直接把整个 patch 向量线性映射到 d_model
+            # Input encoding: projection of feature vectors onto a d-dim vector space
+            if not shared_embedding:
+                self.W_P = nn.ModuleList()
+                for _ in range(self.n_vars):
+                    self.W_P.append(nn.Linear(
+                        patch_len,
+                        d_model,
+                    ))
+            else:
+                self.W_P = nn.Linear(patch_len, d_model)
 
         # Positional encoding
         self.W_pos = positional_encoding(
@@ -200,26 +231,81 @@ class PatchEncoder(nn.Module):
 
     def forward(self, x):
         bs, num_patch, n_vars, patch_len = x.shape
-        # Input encoding
-        if not self.shared_embedding:
-            x_out = []
-            for i in range(n_vars):
-                z = self.W_P[i](x[:, :, i, :])
-                x_out.append(z)
-            x = torch.stack(x_out, dim=2)
-        else:
-            x = self.W_P(x)  # x: [bs x num_patch x nvars x d_model]
-        x = x.transpose(1, 2)
-        # x: [bs x nvars x num_patch x d_model]
-        u = torch.reshape(
-            x, (bs * n_vars, num_patch,
-                self.d_model))  # u: [bs * nvars x num_patch x d_model]
-        u = self.dropout(u +
-                         self.W_pos)  # u: [bs * nvars x num_patch x d_model]
 
-        # Encoder
-        z = self.encoder(u)  # z: [bs * nvars x num_patch x d_model]
-        return z.reshape((-1, n_vars, num_patch, self.d_model))
+        if self.use_inpatch_attn:
+            # 1) in-patch 自注意力：对每个 patch 的时间步做编码并池化为 d_model
+            xb = x.transpose(1, 2)  # [bs, n_vars, num_patch, patch_len]
+            bs_, n_vars_, num_patch_, patch_len_ = xb.shape
+            Bp = bs_ * n_vars_ * num_patch_  # 展平后的 batch 大小
+            tokens = xb.reshape(Bp, patch_len_, 1)
+            # 微批前向，缓解显存峰值
+            sub_bs = getattr(self, 'inpatch_batch_size', 2048)
+            outs_h = []
+            outs_attn_cpu = []
+            for start in range(0, Bp, sub_bs):
+                end = min(start + sub_bs, Bp)
+                t_i = tokens[start:end]
+                h_i = self.inpatch_value_embed(t_i)               # [b, PL, d_model]
+                h_i = h_i + self.inpatch_W_pos                    # 位置编码
+                h_i = self.dropout(h_i)
+                out_i = self.inpatch_encoder(h_i)
+                if isinstance(out_i, tuple):
+                    h_i, attn_i = out_i  # attn_i: [b, H, PL, PL]
+                    # 统一放在CPU，避免在GPU上长期保存大张量
+                    if isinstance(attn_i, torch.Tensor) and attn_i.device.type != 'cpu':
+                        attn_i = attn_i.detach().cpu()
+                    outs_attn_cpu.append(attn_i)
+                outs_h.append(h_i)
+                # 及时释放显存碎片
+                del t_i, h_i, out_i
+                torch.cuda.empty_cache()
+            h = torch.cat(outs_h, dim=0)
+            if len(outs_attn_cpu) > 0:
+                self.last_inpatch_attn = torch.cat(outs_attn_cpu, dim=0)
+                # 记录形状，便于上游还原为 [bs, n_vars, num_patch, H, PL, PL]
+                self.last_inpatch_shape = (bs_, n_vars_, num_patch_, patch_len_)
+            # 清理列表以释放引用
+            del outs_h, outs_attn_cpu
+            h = h.mean(dim=1)                                     # [B', d_model]
+            x_patch = h.reshape(bs_, n_vars_, num_patch_, self.d_model)
+            # 2) 分片间注意力：在 num_patch 维度上做 Transformer（保持原有设计）
+            u = x_patch.reshape(bs_ * n_vars_, num_patch_, self.d_model)
+            u = self.dropout(u + self.W_pos)
+            # 内存自适应：当 num_patch 很大时仍然做一次低开销编码，避免完全退化为均匀注意力
+            if num_patch_ >= 256:
+                # 轻量化编码：按子批在NP维做块状编码，避免一次显存峰值
+                step = 128
+                parts = []
+                for s in range(0, num_patch_, step):
+                    e = min(s + step, num_patch_)
+                    parts.append(self.encoder(u[:, s:e, :]))
+                z = torch.cat(parts, dim=1)
+                del parts
+                torch.cuda.empty_cache()
+            else:
+                z = self.encoder(u)                               # [bs*n_vars, NP, d_model]
+            x_out = z.reshape(bs_, n_vars_, num_patch_, self.d_model)
+            # 缓存最近一次的 patch 表示（放CPU，避免占用显存）供 get_attention_weights 使用
+            try:
+                self.last_x_patch = x_out.detach().cpu()
+            except Exception:
+                self.last_x_patch = None
+            return x_out
+        else:
+            # 旧路径：直接将 patch 向量线性映射到 d_model，再做分片间注意力
+            if not self.shared_embedding:
+                x_out = []
+                for i in range(n_vars):
+                    z = self.W_P[i](x[:, :, i, :])
+                    x_out.append(z)
+                x = torch.stack(x_out, dim=2)
+            else:
+                x = self.W_P(x)  # [bs, num_patch, n_vars, d_model]
+            x = x.transpose(1, 2)                                 # [bs, n_vars, num_patch, d_model]
+            u = x.reshape(bs * n_vars, num_patch, self.d_model)   # [bs*n_vars, NP, d_model]
+            u = self.dropout(u + self.W_pos)
+            z = self.encoder(u)                                   # [bs*n_vars, NP, d_model]
+            return z.reshape((-1, n_vars, num_patch, self.d_model))
         # z: [bs x nvars x d_model x num_patch]
 
 

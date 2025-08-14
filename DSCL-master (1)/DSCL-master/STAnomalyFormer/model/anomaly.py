@@ -169,6 +169,7 @@ class STPatchFormer(nn.Module):
 
         self.revin = RevIN(d_in)
         self.patch = Patch(seq_len, patch_len, stride)
+        # 开启 patch 内时间戳注意力
         self.patch_tsfm = PatchEncoder(
             d_in,
             self.patch.num_patch,
@@ -180,6 +181,10 @@ class STPatchFormer(nn.Module):
             0.1,
             0.1,
             temporal_half,
+            pe='zeros',
+            learn_pe=True,
+            use_inpatch_attn=True,
+            inpatch_pe='sincos',
         )
         self.spatial_tsfm = TemporalTransformer(
             d_model,
@@ -225,10 +230,24 @@ class STPatchFormer(nn.Module):
         # 恢复原始维度
         z = clustered_embeddings.transpose(0, 1)  # (VAR*NP, N, D)
 
-        dy_z, attn = self.spatial_tsfm(z)  # (VAR * NP, N, D)
+        dy_z, attn = self.spatial_tsfm(z)  # dy_z: (VAR * NP, N, D); attn: (VAR*NP, H, N, N)
         st_z, graph = self.da_gcn(z)  # (VAR * NP, N, D)
+        
+        # 🔧 修复：确保返回正确的注意力分数形状，回归Origin设计
+        if isinstance(attn, torch.Tensor) and attn.dim() == 4:
+            # attn: (VAR*NP, H, N, N) -> score_dy: (N, N)
+            score_dy = attn.max(dim=0).values.mean(dim=0)  # tokens取max，heads取mean，提高可分性
+        else:
+            score_dy = attn
+            
+        if isinstance(graph, torch.Tensor) and graph.dim() > 2:
+            # graph: (VAR*NP, N, N) -> score_st: (N, N)
+            score_st = graph.mean(dim=0)  # 只对tokens维度平均
+        else:
+            score_st = graph
+        
         if not return_recon:
-            return attn, graph
+            return score_dy, score_st
 
         if self.dynamic_only:
             z = self.proj_dy(dy_z)  # (VAR * NP, N, PL)
@@ -247,7 +266,7 @@ class STPatchFormer(nn.Module):
         ).permute(2, 1, 3, 0)  # (N, NP, PL, VAR)
         z = self.revin(z, 'denorm')
         z_flat = z.reshape(z.shape[0], -1, z.shape[-1])  # (N, NP*PL, VAR) - 只是reshape
-        return (patch_x.transpose(2, 3), z), (attn, graph), z_flat, cluster_loss
+        return (patch_x.transpose(2, 3), z), (score_dy, score_st), z_flat, cluster_loss
 
 
 class STPatchMaskFormer(STPatchFormer):
@@ -344,6 +363,10 @@ class STPatch_MGCNFormer(nn.Module):
             0.1,
             0.1,
             temporal_half,
+            pe='zeros',
+            learn_pe=True,
+            use_inpatch_attn=True,
+            inpatch_pe='sincos',
         )
         self.spatial_tsfm = TemporalTransformer(
             d_model,
@@ -378,6 +401,114 @@ class STPatch_MGCNFormer(nn.Module):
             nmb_prototype=n_prototypes,
             tau=tau
         )
+
+        # 🆕 新增：独立的片间注意力分支（用于DCdetector的prior attention）
+        # 这个分支专门学习patch与patch之间的关系
+        # 参数共享：片间注意力与patch内注意力共享同一Transformer实例
+        # 直接复用 PatchEncoder 中的 inpatch_encoder（返回注意力）
+        if hasattr(self.patch_tsfm, 'inpatch_encoder') and self.patch_tsfm.inpatch_encoder is not None:
+            self.patchwise_attention = self.patch_tsfm.inpatch_encoder
+        else:
+            # 回退：若未构建inpatch_encoder，则创建一个同构Transformer供片间注意力使用
+            self.patchwise_attention = TemporalTransformer(
+                d_model,
+                d_model // n_heads,
+                d_model // n_heads,
+                n_heads,
+                d_model,
+                0.1,
+                False,
+                True,
+            )
+
+    def get_attention_weights(self, x):
+        """
+        获取注意力权重用于DCdetector损失计算
+        返回: (series_attention, prior_attention, series_inpatch, prior_inpatch)
+        """
+        # 获取patch数据（避免在 PatchEncoder 内部做 num_patch×num_patch 的注意力，降低显存峰值）
+        patch_x = self.patch(x)  # (N, NP, VAR, PL)
+        x_norm = self.revin(patch_x.transpose(2, 3), 'norm').transpose(2, 3)
+
+        # 1) in-patch 注意力（GPU）：按 DC 风格返回最后一次的 (H, PL, PL)
+        xb = x_norm.transpose(1, 2)  # [N, VAR, NP, PL]
+        bs_, n_vars_, num_patch_, patch_len_ = xb.shape
+        # 复用 PatchEncoder 缓存的最近一次 patch 表示（保持在CPU上使用），避免重复做 in-patch 编码
+        x_patch = None
+        inpatch_attn = None
+        if hasattr(self.patch_tsfm, 'last_x_patch') and isinstance(self.patch_tsfm.last_x_patch, torch.Tensor):
+            # 直接使用 CPU 缓存，不搬到 GPU
+            x_patch = self.patch_tsfm.last_x_patch
+            inpatch_attn = getattr(self.patch_tsfm, 'last_inpatch_attn', None)
+        if x_patch is None or not isinstance(x_patch, torch.Tensor):
+            tokens = xb.reshape(bs_ * n_vars_ * num_patch_, patch_len_, 1)
+            h = self.patch_tsfm.inpatch_value_embed(tokens)
+            h = h + self.patch_tsfm.inpatch_W_pos
+            h = self.patch_tsfm.dropout(h)
+            inpatch_out = self.patch_tsfm.inpatch_encoder(h)
+            if isinstance(inpatch_out, tuple):
+                h, inpatch_attn = inpatch_out  # [B', PL, d_model], [B', H, PL, PL]
+            else:
+                inpatch_attn = None
+            # 每 patch 池化得到 patch 表示
+            h_mean = h.mean(dim=1)  # [B', d_model]
+            x_patch = h_mean.reshape(bs_, n_vars_, num_patch_, self.d_model)  # (N, VAR, NP, D)
+
+        # 2) patch 间 prior（CPU低内存）：用余弦相似度近似并行 softmax
+        with torch.no_grad():
+            # 保证在CPU上计算先验
+            x_patch_cpu = x_patch if x_patch.device.type == 'cpu' else x_patch.detach().cpu()
+            N, VAR, NP, D = x_patch_cpu.shape
+            prior_list = []
+            for n in range(N):
+                pv = []
+                for v in range(VAR):
+                    Y = x_patch_cpu[n, v]  # [NP, D]
+                    Yn = Y / (Y.norm(dim=1, keepdim=True) + 1e-8)
+                    S = Yn @ Yn.T  # [NP, NP]
+                    P = torch.softmax(S, dim=-1)
+                    pv.append(P.unsqueeze(0))  # [1, NP, NP]
+                prior_list.append(torch.stack(pv, dim=0))  # [VAR, NP, NP]
+            prior_inpatch = torch.stack(prior_list, dim=0)  # [N, VAR, NP, NP]
+            # 回到模型设备
+            prior_inpatch = prior_inpatch.to(x.device)
+
+        # 为避免显存峰值，跳过空间注意力的显式计算，仅返回时间分支所需权重
+        series_spatial = []
+        prior_spatial = []
+
+        # 额外：series_inpatch (N, VAR, NP, H, PL, PL)
+        series_inpatch = None
+        if inpatch_attn is not None:
+            series_inpatch = inpatch_attn.reshape(bs_, n_vars_, num_patch_, inpatch_attn.shape[1], patch_len_, patch_len_)
+
+        # 🆕 返回四元组：空间注意力(空) + 片间注意力 + 时间注意力
+        # 1. series_spatial: 空间注意力 (VAR, NP, N, N)
+        # 2. prior_spatial: 图注意力 (VAR, NP, N, N) 
+        # 3. series_inpatch: patch内时间注意力 (N, VAR, NP, H, PL, PL)
+        # 4. prior_inpatch: 片间注意力 (N, VAR, NP, NP)
+        return [series_spatial], [prior_spatial], series_inpatch, prior_inpatch
+
+    def get_representations(self, x):
+        """
+        获取中间表示用于备用DCdetector损失计算
+        返回: 中间特征表示
+        """
+        # 获取patch数据
+        patch_x = self.patch(x)  # (N, NP, VAR, PL)
+        x_norm = self.revin(patch_x.transpose(2, 3), 'norm').transpose(2, 3)
+        z = self.patch_tsfm(x_norm)  # (N, VAR, NP, D)
+        z = z.permute(1, 2, 0, 3)  # (VAR, NP, N, D)
+        z = z.reshape(-1, z.shape[2], z.shape[3])  # (VAR * NP, N, D)
+
+        # 获取动态和静态表示
+        dy_z, _ = self.spatial_tsfm(z)  # (VAR * NP, N, D)
+        st_z, _ = self.da_gcn(z)  # (VAR * NP, N, D)
+        
+        # 融合表示
+        fused_repr = torch.cat([dy_z, st_z], dim=-1)  # (VAR * NP, N, 2*D)
+        
+        return fused_repr
 
     def forward(self, x, return_recon=True):
         # x : (N, T, d)
