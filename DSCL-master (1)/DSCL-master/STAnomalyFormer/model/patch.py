@@ -128,35 +128,15 @@ class Patch(nn.Module):
         """
         # 动态计算s_begin，适应不同长度的输入
         actual_seq_len = x.shape[1]
-        
-        # 🆕 修复：确保patch_len不会大于seq_len
-        effective_patch_len = min(self.patch_len, actual_seq_len)
-        effective_stride = min(self.stride, actual_seq_len)
-        
-        # 如果patch_len大于seq_len，调整策略
-        if self.patch_len > actual_seq_len:
-            print(f"   ⚠️  patch_len({self.patch_len}) > seq_len({actual_seq_len})，调整为: patch_len={effective_patch_len}, stride={effective_stride}")
-        
-        # 计算目标长度和起始位置
-        tgt_len = effective_patch_len + effective_stride * (self.num_patch - 1)
+        tgt_len = self.patch_len + self.stride * (self.num_patch - 1)
         s_begin = max(0, actual_seq_len - tgt_len)
         
-        # 确保至少有一个patch
-        if tgt_len > actual_seq_len:
-            effective_stride = max(1, (actual_seq_len - effective_patch_len) // (self.num_patch - 1)) if self.num_patch > 1 else 1
-            tgt_len = effective_patch_len + effective_stride * (self.num_patch - 1)
-            s_begin = max(0, actual_seq_len - tgt_len)
-            print(f"   🔧  调整stride为: {effective_stride}，目标长度: {tgt_len}")
-        
         x = x[:, s_begin:, :]
-        
-        # 使用调整后的参数进行unfold
         x = x.unfold(
             dimension=1,
-            size=effective_patch_len,
-            step=effective_stride,
-        )  # xb: [bs x num_patch x n_vars x effective_patch_len]
-        
+            size=self.patch_len,
+            step=self.stride,
+        )  # xb: [bs x num_patch x n_vars x patch_len]
         return x
 
 
@@ -258,29 +238,8 @@ class PatchEncoder(nn.Module):
             bs_, n_vars_, num_patch_, patch_len_ = xb.shape
             Bp = bs_ * n_vars_ * num_patch_  # 展平后的 batch 大小
             tokens = xb.reshape(Bp, patch_len_, 1)
-            
-            # 🆕 内存优化：动态调整子批次大小，避免显存峰值
-            # 根据patch数量和序列长度动态调整
-            if num_patch_ <= 100:
-                sub_bs = min(2048, Bp)
-            elif num_patch_ <= 300:
-                sub_bs = min(1024, Bp)
-            elif num_patch_ <= 500:
-                sub_bs = min(512, Bp)
-            else:
-                sub_bs = min(256, Bp)
-            
-            # 如果显存不足，进一步减小批次
-            try:
-                torch.cuda.empty_cache()
-                # 测试显存是否足够
-                test_tensor = torch.randn(sub_bs, patch_len_, 1, device=x.device)
-                del test_tensor
-            except RuntimeError:
-                # 显存不足，减小批次大小
-                sub_bs = max(64, sub_bs // 2)
-                print(f"   ⚠️  显存不足，调整子批次大小为: {sub_bs}")
-            
+            # 微批前向，缓解显存峰值
+            sub_bs = getattr(self, 'inpatch_batch_size', 2048)
             outs_h = []
             outs_attn_cpu = []
             for start in range(0, Bp, sub_bs):
@@ -312,17 +271,14 @@ class PatchEncoder(nn.Module):
             # 2) 分片间注意力：在 num_patch 维度上做 Transformer（保持原有设计）
             u = x_patch.reshape(bs_ * n_vars_, num_patch_, self.d_model)
             u = self.dropout(u + self.W_pos)
-            # 🆕 内存优化：当 num_patch 很大时使用更激进的子批处理
+            # 内存自适应：当 num_patch 很大时仍然做一次低开销编码，避免完全退化为均匀注意力
             if num_patch_ >= 256:
                 # 轻量化编码：按子批在NP维做块状编码，避免一次显存峰值
-                step = max(64, num_patch_ // 8)  # 动态调整步长
+                step = 128
                 parts = []
                 for s in range(0, num_patch_, step):
                     e = min(s + step, num_patch_)
                     parts.append(self.encoder(u[:, s:e, :]))
-                    # 及时清理中间结果
-                    if len(parts) > 1:
-                        torch.cuda.empty_cache()
                 z = torch.cat(parts, dim=1)
                 del parts
                 torch.cuda.empty_cache()

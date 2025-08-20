@@ -1552,16 +1552,6 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
         # loss_weight[1]: 聚类损失权重（固定为0.5）
         # loss_weight[2]: DCdetector损失权重（固定为dcdetector_weight）
         self.loss_weight = torch.tensor([0.5, 0.5, self.dcdetector_weight], device=self.device)
-    
-    def _memory_cleanup(self):
-        """内存清理辅助方法"""
-        try:
-            torch.cuda.empty_cache()
-            # 强制垃圾回收
-            import gc
-            gc.collect()
-        except Exception:
-            pass
 
     def fit(self, x, mats, evaluate=None, x_clean=None):
         print("开始fit方法...")
@@ -1603,57 +1593,13 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
         process = range(self.epoch) if not self.verbose else tqdm(
             range(self.epoch))
         print(f"开始训练，总轮数: {self.epoch}")
-        print(f"初始固定权重: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}, {self.dcdetector_weight:.4f}]")
+        print(f"初始固定权重: [{self.loss_weight[0].item():.4f}, {self.loss_weight[1].item():.4f}, {self.loss_weight[2].item():.4f}]")
         if self.use_dcdetector:
             print(f"🆕 DCdetector损失已启用，权重: {self.dcdetector_weight:.4f}")
             print(f"🆕 DCdetector patch sizes: {self.dcdetector_patch_sizes}")
-        
-        # 🆕 启用混合精度训练以提高速度
-        if torch.cuda.is_available():
-            scaler = torch.cuda.amp.GradScaler()
-            print("🚀 已启用混合精度训练 (AMP)，可提高训练速度并减少显存使用")
-        else:
-            scaler = None
-            print("ℹ️  CPU模式：跳过混合精度训练")
-        
-        # 🆕 内存监控和自动调整
-        if self.segment_mode == 'windows':
-            # 检查可用显存并自动调整参数
-            try:
-                if torch.cuda.is_available():
-                    total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3  # GB
-                    free_memory = torch.cuda.memory_reserved(0) / 1024**3  # GB
-                    print(f"💾 GPU显存信息: 总计 {total_memory:.1f}GB, 已用 {free_memory:.1f}GB")
-                    
-                    # 根据显存情况自动调整序列长度
-                    if total_memory < 8:  # 小于8GB
-                        self.seq_len = min(self.seq_len, 100)
-                        print(f"   ⚠️  显存较小，自动调整序列长度为: {self.seq_len}")
-                    elif total_memory < 16:  # 小于16GB
-                        self.seq_len = min(self.seq_len, 200)
-                        print(f"   ⚠️  显存中等，自动调整序列长度为: {self.seq_len}")
-                    else:
-                        print(f"   ✅ 显存充足，使用原始序列长度: {self.seq_len}")
-            except Exception as e:
-                print(f"   ⚠️  无法获取显存信息: {e}")
-            
-            # 🆕 修复参数冲突：确保patch_len <= seq_len
-            if hasattr(self, 'patch_len') and hasattr(self, 'stride'):
-                if self.patch_len > self.seq_len:
-                    print(f"   ⚠️  检测到参数冲突: patch_len({self.patch_len}) > seq_len({self.seq_len})")
-                    print(f"   🔧 自动调整patch_len为: {self.seq_len}")
-                    self.patch_len = self.seq_len
-                    # 同时调整stride，确保能产生至少一个patch
-                    if self.stride > self.seq_len:
-                        self.stride = max(1, self.seq_len // 2)
-                        print(f"   🔧 自动调整stride为: {self.stride}")
-                    
-                    # 更新模型参数
-                    if hasattr(self, 'model_args'):
-                        self.model_args['patch_len'] = self.patch_len
-                        self.model_args['stride'] = self.stride
-                        print(f"   ✅ 模型参数已更新: patch_len={self.patch_len}, stride={self.stride}")
-        
+        # print("🆕 新功能：已启用滑动窗口时间戳预测")
+        # print("📝 训练时将使用滑动窗口损失，预测完成后将使用滑动窗口预测所有时间戳的异常情况")
+        # print("🔧 滑动窗口：用前12个时间戳预测第12个，用1-12预测第12个，用2-13预测第13个，以此类推")
         print("=" * 60)
 
         for epoch in process:
@@ -1661,145 +1607,85 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
             seq_len = getattr(self, 'seq_len', getattr(self.model, 'seq_len', 12))
             N, T, D = x_.shape
 
-            if self.segment_mode == 'windows':
-                # 滑动窗口训练 - 优化版本
-                num_windows = T - seq_len + 1
-                if epoch == 0:
-                    print(f"🔄 滑动窗口训练：共 {num_windows} 个窗口，每个窗口长度 {seq_len}")
-                    print(f"🎯 使用异常恢复预测范式训练，总共 {num_windows} 个窗口")
-                    print(f"📊 训练策略：异常数据 → 预测正常值 → 与clean真实值比较")
-                    print(f"💾 内存优化：使用小批次训练，避免显存峰值")
+            # if self.segment_mode == 'windows':
+            #     # 滑动窗口训练
+            #     num_windows = T - seq_len
+            #     if epoch == 0:
+            #         print(f"🔄 滑动窗口训练：共 {num_windows} 个窗口，每个窗口长度 {seq_len}")
+            #         print(f"🎯 使用异常恢复预测范式训练，总共 {num_windows} 个窗口")
+            #         print(f"📊 训练策略：异常数据 → 预测正常值 → 与clean真实值比较")
 
-                # 内存优化：根据序列长度动态调整批次大小
-                if seq_len <= 100:
-                    batch_size = 64  # 从16增加到64
-                elif seq_len <= 500:
-                    batch_size = 32  # 从8增加到32
-                elif seq_len <= 1000:
-                    batch_size = 16  # 从4增加到16
-                else:
-                    batch_size = 8   # 从2增加到8
-                
-                print(f"   💾 动态批次大小: {batch_size} (基于序列长度 {seq_len})")
-                
-                # 🆕 优化：减少滑动窗口数量，通过采样减少训练窗口
-                if num_windows > 1000:  # 如果窗口数过多
-                    # 计算需要减少多少倍
-                    stride_multiplier = max(1, num_windows // 1000)
-                    effective_num_windows = 1000  # 固定为1000个窗口
-                    print(f"   🚀 窗口数量优化: 原始窗口数 {num_windows} → 优化后 {effective_num_windows} (采样倍数: {stride_multiplier})")
-                    print(f"   🔧 优化策略: 从{num_windows}个窗口中均匀采样{effective_num_windows}个进行训练")
-                    
-                    # 创建采样索引
-                    sample_indices = torch.linspace(0, num_windows-1, effective_num_windows, dtype=torch.long)
-                    print(f"   📊 采样索引范围: {sample_indices[0].item()} ~ {sample_indices[-1].item()}")
-                    
-                    # 创建优化后的数据集（使用采样索引）
-                    if x_clean is not None:
-                        train_dataset = AnomalyRecoveryDataset(x_, x_clean_, seq_len, sample_indices=sample_indices)
-                    else:
-                        train_dataset = SlidingWindowDataset(x_, seq_len, sample_indices=sample_indices)
-                else:
-                    if x_clean is not None:
-                        train_dataset = AnomalyRecoveryDataset(x_, x_clean_, seq_len)
-                    else:
-                        train_dataset = SlidingWindowDataset(x_, seq_len)
+            #     if x_clean is not None:
+            #         train_dataset = AnomalyRecoveryDataset(x_, x_clean_, seq_len)
+            #     else:
+            #         train_dataset = SlidingWindowDataset(x_, seq_len)
 
-                train_loader = torch.utils.data.DataLoader(
-                    train_dataset,
-                    batch_size=batch_size,
-                    shuffle=True,
-                    num_workers=0,  # 改回0，避免多进程问题
-                    pin_memory=False,  # CPU模式下禁用pin_memory
-                    persistent_workers=False,  # 禁用persistent_workers
-                    collate_fn=self._custom_collate_fn,  # 添加自定义collate函数
-                )
+            #     batch_size = 32
+            #     train_loader = torch.utils.data.DataLoader(
+            #         train_dataset,
+            #         batch_size=batch_size,
+            #         shuffle=True,
+            #         num_workers=0,
+            #         pin_memory=False,
+            #     )
+            # else:
+            # 整段序列训练：单样本 (N,T,D)
+            if epoch == 0:
+                print(f"🚫 不做时间滑窗：整段序列训练，长度 T={T}")
+            train_dataset = SequenceRecoveryDataset(x_, x_clean_, target_len=1)
+            batch_size = 1
+            train_loader = torch.utils.data.DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=0,
+                pin_memory=False,
+            )
 
-                total_loss = 0.0
-                total_count = 0
+            # total_loss = 0.0
+            # total_count = 0
 
-                for batch_idx, (batch_windows, batch_targets) in enumerate(train_loader):
-                    # 检查批次是否为空
-                    if batch_windows.numel() == 0 or batch_targets.numel() == 0:
-                        print(f"   ⚠️  跳过空批次 {batch_idx + 1}")
-                        continue
-                        
-                    # 将数据移到设备上
-                    batch_windows = batch_windows.to(self.device)  # (batch_size, N, L, D)
-                    batch_targets = batch_targets.to(self.device)  # (batch_size, N, 1, D)
+            # for batch_idx, (batch_windows, batch_targets) in enumerate(train_loader):
+            #     # 将数据移到设备上
+            #     batch_windows = batch_windows.to(self.device)  # (batch_size, N, L, D)
+            #     batch_targets = batch_targets.to(self.device)  # (batch_size, N, 1, D)
 
-                    batch_loss = 0.0
-                    batch_count = 0
+            #     batch_loss = 0.0
+            #     batch_count = 0
 
-                    # 处理这个批次中的每个窗口
-                    for j in range(batch_windows.shape[0]):
-                        window = batch_windows[j]  # (N, L, D)
-                        target = batch_targets[j]  # (N, 1, D)
+            #     # 处理这个批次中的每个窗口/整段
+            #     for j in range(batch_windows.shape[0]):
+            #         window = batch_windows[j]  # (N, L, D)
+            #         target = batch_targets[j]  # (N, 1, D)
 
-                        # 内存优化：及时清理中间变量
-                        with torch.amp.autocast('cpu', enabled=False):  # 禁用混合精度，避免内存问题
-                            (window_patch_x, window_patch_recon), (window_score_dy, window_score_st), window_patch_recon_flat, _ = self.model(window)
+            #         (window_patch_x, window_patch_recon), (window_score_dy, window_score_st), window_patch_recon_flat, _ = self.model(window)
 
-                        window_last_recon = self.time_proj(window_patch_recon_flat.transpose(1, 2)).transpose(1, 2)  # (N, 1, D)
-                        window_last_recon_proj = self.last_linear(window_last_recon.squeeze(1)).unsqueeze(1)
+            #         window_last_recon = self.time_proj(window_patch_recon_flat.transpose(1, 2)).transpose(1, 2)  # (N, 1, D)
+            #         window_last_recon_proj = self.last_linear(window_last_recon.squeeze(1)).unsqueeze(1)
 
-                        window_loss = 5.0 * F.mse_loss(window_last_recon_proj, target)
+            #         window_loss = 5.0 * F.mse_loss(window_last_recon_proj, target)
 
-                        batch_loss += window_loss
-                        batch_count += 1
+            #         batch_loss += window_loss
+            #         batch_count += 1
 
-                        # 🆕 优化内存清理：减少清理频率，只在批次结束时清理
-                        if j == batch_windows.shape[0] - 1:  # 只在批次结束时清理
-                            del window_patch_x, window_patch_recon, window_score_dy, window_score_st, window_patch_recon_flat
-                            del window_last_recon, window_last_recon_proj, window_loss
-                            # 减少内存清理频率，避免过度清理
-                            if batch_idx % 5 == 0:  # 每5个批次清理一次，而不是每个批次都清理
-                                self._memory_cleanup()
+            #     # 反向传播与优化
+            #     batch_loss.backward()
+            #     self.optimizer.step()
+            #     self.optimizer.zero_grad()
 
-                    # 检查batch_loss是否为tensor
-                    if not isinstance(batch_loss, torch.Tensor):
-                        print(f"   ❌ 批次 {batch_idx + 1} 的损失不是tensor，跳过")
-                        continue
-                        
-                    # 反向传播与优化
-                    batch_loss.backward()
-                    self.optimizer.step()
-                    self.optimizer.zero_grad()
+            #     total_loss += batch_loss.item()
+            #     total_count += batch_count
 
-                    total_loss += batch_loss.item()
-                    total_count += batch_count
+            #     if self.verbose and batch_idx % 5 == 0:
+            #         print(f"   📊 批次 {batch_idx + 1}/{len(train_loader)}, 损失: {batch_loss.item():.6f}")
 
-                    if self.verbose and batch_idx % 5 == 0:
-                        print(f"   📊 批次 {batch_idx + 1}/{len(train_loader)}, 损失: {batch_loss.item():.6f}")
-
-                    # 🆕 优化内存清理：减少批次间清理频率
-                    del batch_windows, batch_targets, batch_loss
-                    # 减少内存清理频率，避免过度清理
-                    if batch_idx % 5 == 0:  # 每5个批次清理一次，而不是每个批次都清理
-                        self._memory_cleanup()
-
-                # 为了保持原有的损失计算逻辑，我们也计算一个代表窗口的损失
-                first_window = x_[:, :seq_len, :]
-            else:
-                # 整段序列训练：单样本 (N,T,D)
-                if epoch == 0:
-                    print(f"🚫 不做时间滑窗：整段序列训练，长度 T={T}")
-                train_dataset = SequenceRecoveryDataset(x_, x_clean_, target_len=1)
-                batch_size = 1
-                train_loader = torch.utils.data.DataLoader(
-                    train_dataset,
-                    batch_size=batch_size,
-                    shuffle=False,
-                    num_workers=0,
-                    pin_memory=False,
-                )
-
-                # 为了保持原有的损失计算逻辑，我们也计算一个代表窗口/整段的损失
-                first_window = x_  # 整段
-
-            # 计算模型输出用于损失计算
+            # 为了保持原有的损失计算逻辑，我们也计算一个代表窗口/整段的损失
+            # if self.segment_mode == 'windows':
+            #     first_window = x_[:, :seq_len, :]
+            # else:
+            first_window = x_  # 整段
             (patch_x, patch_recon), (score_dy, score_st), patch_recon_flat, cluster_loss = self.model(first_window)
-            
+
             # 重构损失：固定权重为1
             if self.use_recon:
                 recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))
@@ -1823,7 +1709,13 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                 
                 # 添加调试信息
                 if epoch == 0:
-                    pass  # 调试信息已注释
+                    print(f"   🔍 调试信息 - score_dy原始形状: {score_dy.shape}, 范围: [{score_dy.min():.6f}, {score_dy.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_dy重塑后形状: {score_dy_reshaped.shape}, 范围: [{score_dy_reshaped.min():.6f}, {score_dy_reshaped.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_dy概率分布形状: {score_dy_prob.shape}, 范围: [{score_dy_prob.min():.6f}, {score_dy_prob.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_dy概率分布每行和: [{score_dy_prob.sum(dim=-1).min():.6f}, {score_dy_prob.sum(dim=-1).max():.6f}]")
+                    print(f"   🔍 调试信息 - score_st形状: {score_st.shape}, 范围: [{score_st.min():.6f}, {score_st.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_st概率分布形状: {score_st_prob.shape}, 范围: [{score_st_prob.min():.6f}, {score_st_prob.max():.6f}]")
+                    print(f"   🔍 调试信息 - score_st概率分布每行和: [{score_st_prob.sum(dim=-1).min():.6f}, {score_st_prob.sum(dim=-1).max():.6f}]")
                 
                 if self.diff_const:
                     discrepancy = sym_kl_loss(score_dy_prob,
@@ -1836,7 +1728,8 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                 
                 # 添加调试信息
                 if epoch == 0:
-                    pass  # 调试信息已注释
+                    print(f"   🔍 调试信息 - discrepancy形状: {discrepancy.shape}, 值: {discrepancy.mean():.6f}")
+                    print(f"   🔍 调试信息 - loss_const: {loss_const:.6f}")
             else:
                 loss_const = 0.0
                 
@@ -1906,7 +1799,7 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                                         si = series_inpatch if series_inpatch.device.type == 'cpu' else series_inpatch.cpu()
                                         wi = prior_inpatch if prior_inpatch.device.type == 'cpu' else prior_inpatch.cpu()
                                         # 调试：打印实际形状
-                                        # print(f"🔍 调试 - si形状: {si.shape}, wi形状: {wi.shape}")
+                                        print(f"🔍 调试 - si形状: {si.shape}, wi形状: {wi.shape}")
                                         # 归一化权重（沿最后一维NP）
                                         wi = torch.softmax(wi, dim=-1)
                                         # 去掉中间维度1，然后做加权聚合
@@ -2108,12 +2001,12 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                     
                     # 重构损失：固定权重为1
                     if self.use_recon:
-                        # print(f"🔍 调试：patch_x shape: {patch_x.shape}")
-                        # print(f"🔍 调试：patch_recon shape: {patch_recon.shape}")
+                        print(f"🔍 调试：patch_x shape: {patch_x.shape}")
+                        print(f"🔍 调试：patch_recon shape: {patch_recon.shape}")
                         recon = torch.abs(patch_x - patch_recon).mean((1, 2, 3))  # (N,)
-                        # print(f"🔍 调试：recon shape: {recon.shape}")
+                        print(f"🔍 调试：recon shape: {recon.shape}")
                         score_recon = 1.0 * recon  # 固定权重1
-                        # print(f"🔍 调试：score_recon shape: {score_recon.shape}")
+                        print(f"🔍 调试：score_recon shape: {score_recon.shape}")
                     else:
                         recon = torch.zeros_like(loss_last)  # 确保recon变量总是被定义
                         score_recon = torch.zeros_like(loss_last)  # (N,)
@@ -2134,14 +2027,14 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
                             # 确保discrepancy在正确的设备上
                             if isinstance(discrepancy, torch.Tensor):
                                 discrepancy = discrepancy.to(self.device)
-                            # print(f"🔍 调试：discrepancy shape: {discrepancy.shape}")
-                            # print(f"🔍 调试：discrepancy value: {discrepancy}")
+                            print(f"🔍 调试：discrepancy shape: {discrepancy.shape}")
+                            print(f"🔍 调试：discrepancy value: {discrepancy}")
                             score_const = self.loss_weight[0] * discrepancy * torch.ones(N, device=self.device)
-                            # print(f"🔍 调试：score_const shape: {score_const.shape}")
+                            print(f"🔍 调试：score_const shape: {score_const.shape}")
                         
                     # 计算总分数
                     window_score = score_recon + score_const  # (N,)
-                    # print(f"🔍 调试：window_score shape: {window_score.shape}")
+                    print(f"🔍 调试：window_score shape: {window_score.shape}")
                     batch_scores.append(window_score)
                         
                     # 立即清理中间变量 - 更彻底的清理
@@ -2188,11 +2081,11 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
             # 最终聚合所有批次的结果
             score = torch.stack(aggregated_scores, dim=0)
             score = score.cpu().numpy()
-            # print(f"🔍 调试：聚合前score shape: {score.shape}")
+            print(f"🔍 调试：聚合前score shape: {score.shape}")
             if score.ndim > 1:
                 score = score.mean(axis=0)
             score = score.flatten()
-            # print(f"🔍 调试：最终score shape: {score.shape}, 期望: (358,)")
+            print(f"🔍 调试：最终score shape: {score.shape}, 期望: (358,)")
             print(f"✅ 聚合完成，共处理 {total_windows} 个窗口")
         
         # 只在需要时输出详细信息
@@ -2683,86 +2576,6 @@ class STPatch_MGCNDetector(STPatchFormerDetector):
         else:
             # 简化版本：直接复制矩阵到所有patch
             return window_mat.unsqueeze(2).expand(Nn, Var, NP, Hh, PL, PL)
-
-    def _custom_collate_fn(self, batch):
-        """自定义collate函数，处理不同形状的张量批次"""
-        try:
-            # 分离windows和targets
-            windows, targets = zip(*batch)
-            
-            # 检查所有windows的形状是否一致
-            window_shapes = [w.shape for w in windows]
-            target_shapes = [t.shape for t in targets]
-            
-            # 过滤掉无效的样本（时间维度为0）
-            valid_indices = []
-            for i, (w, t) in enumerate(zip(windows, targets)):
-                if w.shape[1] > 0 and t.shape[1] > 0:  # 确保时间维度大于0
-                    valid_indices.append(i)
-            
-            if len(valid_indices) == 0:
-                print(f"❌ 所有样本都无效，返回空批次")
-                return torch.empty(0), torch.empty(0)
-            
-            # 只使用有效的样本
-            valid_windows = [windows[i] for i in valid_indices]
-            valid_targets = [targets[i] for i in valid_indices]
-            
-            if len(valid_windows) != len(batch):
-                print(f"⚠️  过滤了 {len(batch) - len(valid_windows)} 个无效样本")
-            
-            # 检查有效样本的形状
-            valid_window_shapes = [w.shape for w in valid_windows]
-            valid_target_shapes = [t.shape for t in valid_targets]
-            
-            # 如果形状不一致，打印调试信息
-            if len(set(valid_window_shapes)) > 1 or len(set(valid_target_shapes)) > 1:
-                print(f"⚠️  检测到不一致的张量形状:")
-                print(f"   Windows形状: {valid_window_shapes[:5]}...")  # 只显示前5个
-                print(f"   Targets形状: {valid_target_shapes[:5]}...")
-                
-                # 找到最大形状
-                max_window_shape = max(valid_window_shapes, key=lambda x: x[1])  # 按时间维度排序
-                max_target_shape = max(valid_target_shapes, key=lambda x: x[1])
-                
-                # 填充到最大形状
-                padded_windows = []
-                padded_targets = []
-                
-                for w, t in zip(valid_windows, valid_targets):
-                    # 填充window
-                    if w.shape[1] < max_window_shape[1]:
-                        pad_size = max_window_shape[1] - w.shape[1]
-                        w_padded = torch.cat([w, w[:, -1:, :].repeat(1, pad_size, 1)], dim=1)
-                    else:
-                        w_padded = w
-                    
-                    # 填充target
-                    if t.shape[1] < max_target_shape[1]:
-                        pad_size = max_target_shape[1] - t.shape[1]
-                        t_padded = torch.cat([t, t[:, -1:, :].repeat(1, pad_size, 1)], dim=1)
-                    else:
-                        t_padded = t
-                    
-                    padded_windows.append(w_padded)
-                    padded_targets.append(t_padded)
-                
-                # 堆叠填充后的张量
-                batch_windows = torch.stack(padded_windows)
-                batch_targets = torch.stack(padded_targets)
-            else:
-                # 形状一致，直接堆叠
-                batch_windows = torch.stack(valid_windows)
-                batch_targets = torch.stack(valid_targets)
-            
-            return batch_windows, batch_targets
-            
-        except Exception as e:
-            print(f"❌ Collate函数错误: {e}")
-            print(f"   批次大小: {len(batch)}")
-            print(f"   第一个样本形状: {batch[0][0].shape if batch else 'N/A'}")
-            # 返回空批次，避免崩溃
-            return torch.empty(0), torch.empty(0)
 
 
 

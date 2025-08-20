@@ -57,8 +57,7 @@ parser.add_argument('--tau', default=0.5, type=float, help='温度参数')
 # 添加DCdetector相关参数
 parser.add_argument('--use_dcdetector', action='store_true', help='是否使用DCdetector损失')
 parser.add_argument('--dcdetector_weight', default=1.0, type=float, help='DCdetector损失权重')
-# 修改DCdetector的patch sizes参数，使用patch_len而不是硬编码的[3, 5, 7]
-parser.add_argument('--dcdetector_patch_sizes', nargs='+', type=int, default=None, help='DCdetector的patch sizes (默认使用patch_len)')
+parser.add_argument('--dcdetector_patch_sizes', nargs='+', type=int, default=[3, 5, 7], help='DCdetector的patch sizes')
 
 parser.add_argument('--cuda', action='store_true')
 
@@ -79,16 +78,15 @@ for t in range(args.repeat):
     print("{}-th experiment:".format(t + 1))
     print("正在初始化模型...")
 
-    # 修改DCdetector的patch sizes，使用patch_len参数保持一致性
-    dcdetector_patch_sizes = args.dcdetector_patch_sizes if args.dcdetector_patch_sizes else [args.patch_len]
-
     model = STPatch_MGCNDetector(
-        seq_len=12 if args.segment_mode == 'windows' else test_X.shape[1],
+        seq_len=12,
         patch_len=args.patch_len,
         stride=args.stride,
-        d_in=X.shape[-1],  # 添加缺失的d_in参数
+        d_in=X.shape[-1],
         d_model=args.d_model,
         n_heads=args.n_heads,
+        temporal_half=args.t_half,
+        spatial_half=args.s_half,
         n_gcn=args.n_gcn,
         device='cuda' if args.cuda and torch.cuda.is_available() else 'cpu',
         epoch=args.epochs,
@@ -107,17 +105,9 @@ for t in range(args.repeat):
         # DCdetector相关参数
         use_dcdetector=args.use_dcdetector,
         dcdetector_weight=args.dcdetector_weight,
-        dcdetector_patch_sizes=dcdetector_patch_sizes,
+        dcdetector_patch_sizes=args.dcdetector_patch_sizes,
     )
     print("模型初始化完成，开始训练...")
-    
-    # 打印DCdetector配置信息
-    if args.use_dcdetector:
-        print(f"🆕 DCdetector配置:")
-        print(f"   - 损失权重: {args.dcdetector_weight}")
-        print(f"   - Patch sizes: {dcdetector_patch_sizes} (基于patch_len: {args.patch_len})")
-        print(f"   - 训练和检测使用相同的patch策略，保持一致性")
-    
     model.fit(X, np.array([adj, distance, connectivity]), (val_X, y), x_clean=X_clean)
     print("训练完成！")
 
@@ -209,11 +199,11 @@ for t in range(args.repeat):
     print(f"   📊 异常分数均值: {np.nanmean(all_timestamps_scores):.6f}")
     print(f"   📉 异常分数标准差: {np.nanstd(all_timestamps_scores):.6f}")
     print(f"   🔍 数据形状: {all_timestamps_scores.shape} (区域数 × 时间戳数)")
-    
+
     # 🆕 优化：基于区域异常检测结果，只在异常区域中寻找异常时间戳
     print(f"\n🚀 优化策略：只在异常区域中寻找异常时间戳")
     print("─" * 60)
-    
+
     # 获取区域异常检测结果
     N = all_timestamps_scores.shape[0]  # 区域数量
     region_anomaly_mask = (score >= threshold).astype(bool)  # (N,) - True表示异常区域
@@ -256,18 +246,18 @@ for t in range(args.repeat):
         print("   ⚠️ 没有检测到异常区域，跳过时间戳异常检测")
         anomaly_timestamp_mask = np.zeros_like(all_timestamps_scores, dtype=bool)
         per_ts_anomaly_counts = np.zeros(all_timestamps_scores.shape[1])
-    
+
     # 加载测试集的真实时间戳标签
     import os
     data_dir = f"pems0{args.dataset}"  # 修复：直接使用pems03目录
     test_y_timestamps = np.load(os.path.join(data_dir, "anomaly_labels_test.npy"))  # (T, N)
-    
+
     print(f"真实标签矩阵形状: {test_y_timestamps.shape}")  # (T, N)
-    
+
     # 计算每个时间戳的异常检测指标
     print(f"\n📈 时间戳异常检测评估（优化版）:")
     print("─" * 60)
-    
+
     # 收集异常区域的时间戳数据
     anomaly_scores = []
     anomaly_labels = []
@@ -279,16 +269,16 @@ for t in range(args.repeat):
                 # 只考虑异常区域
                 anomaly_scores_t = all_timestamps_scores[region_anomaly_mask, t_idx]  # (anomaly_region_count,)
                 anomaly_labels_t = test_y_timestamps[t_idx][region_anomaly_mask]  # (anomaly_region_count,)
-            
-            # 过滤掉NaN值
+                
+                # 过滤掉NaN值
                 valid_mask = ~np.isnan(anomaly_scores_t)
-            if valid_mask.sum() > 0:
+                if valid_mask.sum() > 0:
                     valid_scores = anomaly_scores_t[valid_mask]
                     valid_labels = anomaly_labels_t[valid_mask]
-                
+                    
                     anomaly_scores.extend(valid_scores)
                     anomaly_labels.extend(valid_labels)
-    
+
     # 转换为numpy数组
     anomaly_scores = np.array(anomaly_scores)
     anomaly_labels = np.array(anomaly_labels)
@@ -322,14 +312,14 @@ for t in range(args.repeat):
     else:
         print("   ⚠️  没有找到有效的异常区域时间戳样本")
         last_timestamp_score_list.append([0.0, 0.0, 0.0])
-    
+
     # 显示评估结果
     print(f"   📊 异常检测评估总结:")
     print(f"      - 评估方式: 只在预测为异常的区域中寻找异常时间戳")
     print(f"      - 异常区域数: {anomaly_region_count} / {N} ({anomaly_region_count/N*100:.1f}%)")
     print(f"      - 异常时间戳比例: 5%和10% (从异常区域时间戳中预测top-5%和top-10%为异常)")
     print(f"      - 计算量减少: {(1 - anomaly_region_count/N)*100:.1f}% (跳过正常区域)")
-    
+
     # 总结信息
     print("="*80)
     print("🎉 优化版时间戳异常检测完成！")
