@@ -15,7 +15,8 @@ class SlidingWindowDataset(torch.utils.data.Dataset):
         self.seq_len = seq_len
         self.target_len = target_len
         self.N, self.T, self.D = data.shape
-        self.num_windows = self.T - self.seq_len
+        # 窗口数与训练循环保持一致：允许最后一个窗口的目标为窗口内最后一步
+        self.num_windows = self.T - self.seq_len + 1
         
         # 🆕 支持采样索引
         if sample_indices is not None:
@@ -30,25 +31,23 @@ class SlidingWindowDataset(torch.utils.data.Dataset):
         if self.use_sampling:
             return len(self.sample_indices)
         else:
-            # 确保有足够的数据来预测下一个时间戳
             return max(0, self.num_windows)
     
     def __getitem__(self, idx):
         """动态生成滑动窗口样本"""
         if self.use_sampling:
-            # 使用采样索引
-            actual_idx = self.sample_indices[idx].item()
+            actual_idx = int(self.sample_indices[idx].item())
         else:
-            # 使用原始索引
-            actual_idx = idx
+            actual_idx = int(idx)
             
         # 计算时间戳范围
         start_idx = actual_idx
         end_idx = start_idx + self.seq_len
-        target_start = end_idx  # 预测下一个时间戳
+        # 目标为窗口内最后一个时间步
+        target_start = end_idx - 1
         target_end = target_start + self.target_len
         
-        # 动态切片，不预先加载
+        # 切片
         window = self.data[:, start_idx:end_idx, :]  # (N, seq_len, D)
         target = self.data[:, target_start:target_end, :]  # (N, target_len, D)
         
@@ -72,7 +71,8 @@ class AnomalyRecoveryDataset(torch.utils.data.Dataset):
         self.seq_len = seq_len
         self.target_len = target_len
         self.N, self.T, self.D = anomaly_data.shape
-        self.num_windows = self.T - self.seq_len
+        # 与训练循环保持一致
+        self.num_windows = self.T - self.seq_len + 1
         
         # 🆕 支持采样索引
         if sample_indices is not None:
@@ -87,44 +87,24 @@ class AnomalyRecoveryDataset(torch.utils.data.Dataset):
         if self.use_sampling:
             return len(self.sample_indices)
         else:
-            # 确保有足够的数据来预测下一个时间戳
             return max(0, self.num_windows)
     
     def __getitem__(self, idx):
         """动态生成异常恢复样本"""
         if self.use_sampling:
-            # 使用采样索引
-            actual_idx = self.sample_indices[idx].item()
+            actual_idx = int(self.sample_indices[idx].item())
         else:
-            # 使用原始索引
-            actual_idx = idx
+            actual_idx = int(idx)
             
         # 计算时间戳范围
         start_idx = actual_idx
         end_idx = start_idx + self.seq_len
-        target_start = end_idx  # 预测下一个时间戳
+        # 目标为窗口内最后一个时间步
+        target_start = end_idx - 1
         target_end = target_start + self.target_len
         
-        # 🆕 添加边界检查，确保不会产生无效的张量
-        if end_idx > self.T or target_end > self.T:
-            # 如果超出边界，使用最后一个有效窗口
-            start_idx = max(0, self.T - self.seq_len - 1)
-            end_idx = start_idx + self.seq_len
-            target_start = min(end_idx, self.T - 1)
-            target_end = min(target_start + self.target_len, self.T)
-        
-        # 确保时间维度大于0
-        if end_idx <= start_idx or target_end <= target_start:
-            # 如果仍然无效，使用默认窗口
-            start_idx = 0
-            end_idx = min(self.seq_len, self.T)
-            target_start = min(end_idx, self.T - 1)
-            target_end = min(target_start + self.target_len, self.T)
-        
-        # 输入：注入异常数据的滑动窗口 (N, seq_len, D)
+        # 切片
         window = self.anomaly_data[:, start_idx:end_idx, :]  # (N, seq_len, D)
-        
-        # 目标：未注入异常数据中对应时间点的值 (N, 1, D)
         target = self.clean_data[:, target_start:target_end, :]  # (N, target_len, D)
         
         return window, target
